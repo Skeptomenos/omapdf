@@ -626,7 +626,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         show_pen_color()
         header.pack_start(color_btn)
 
-        make_tool("highlight", "▆", "Highlight — drag a region")
+        make_tool("highlight", '<span background="#f7d94c" foreground="#333333"> A </span>',
+                  "Highlighter — drag across a region", markup=True)
         make_tool("text", "T", "Text — click to type onto the page")
         make_tool("note", "🗨", "Sticky note — click to leave a comment")
         tool_sep()
