@@ -557,15 +557,39 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if not tools[name].get_active():
                 tools[name].set_active(True)
 
-        def make_tool(name, icon, tip, markup=False):
+        def cursor_icon():
+            # The classic northwest mouse-pointer arrow, drawn in the
+            # button's own foreground color (no theme icon needed).
+            da = Gtk.DrawingArea()
+            da.set_content_width(16)
+            da.set_content_height(16)
+
+            def dr(widget, ctx, _w, _h):
+                c = widget.get_color()
+                ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
+                pts = [(4, 1), (4, 13), (7.2, 10.4), (9.0, 14.4),
+                       (11.1, 13.4), (9.3, 9.6), (13.6, 9.3)]
+                ctx.move_to(*pts[0])
+                for p in pts[1:]:
+                    ctx.line_to(*p)
+                ctx.close_path()
+                ctx.fill()
+
+            da.set_draw_func(dr)
+            return da
+
+        def make_tool(name, icon, tip, markup=False, child=None):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
-            label = Gtk.Label()
-            if markup:
-                label.set_markup(icon)
+            if child is not None:
+                btn.set_child(child)
             else:
-                label.set_text(icon)
-            btn.set_child(label)
+                label = Gtk.Label()
+                if markup:
+                    label.set_markup(icon)
+                else:
+                    label.set_text(icon)
+                btn.set_child(label)
             btn.set_tooltip_text(tip)
             if first_btn is None:
                 first_btn = btn
@@ -588,7 +612,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         header.pack_start(side_toggle)
         tool_sep()
 
-        make_tool("select", "⬚", "Select — click an item, drag to move (Esc deselects, Del removes)")
+        make_tool("select", None, "Select — click an item, drag to move (Esc deselects, Del removes)",
+                  child=cursor_icon())
         tool_sep()
         make_tool("pen", "✎", "Pen — freehand ink")
 
@@ -730,23 +755,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         win.set_titlebar(header)
 
         def celebrate_save():
-            # A little cheer: the Save button flips green and a thumbs-up
-            # pops (small → big → settle), then everything reverts.
+            # A little cheer: the Save button flips green with a same-size 👍
+            # (no layout jiggle), while a bigger thumbs-up pops in an overlay
+            # floating just beneath it — small → big → settle — then fades.
             label = save_btn.get_child()
             save_btn.add_css_class("save-success")
             save_btn.set_sensitive(False)
-            frames = [(0, "9000"), (90, "14000"), (200, "17000"),
-                      (330, "13000"), (450, "14500")]
+            label.set_text("👍")
+            frames = [(0, "11000"), (90, "18000"), (200, "24000"),
+                      (330, "16000"), (450, "19000")]
             for delay, size in frames:
                 GLib.timeout_add(
                     delay,
-                    lambda s=size: (label.set_markup(f'<span size="{s}">👍</span>'), False)[1],
+                    lambda s=size: (cheer_label.set_markup(f'<span size="{s}">👍</span>'), False)[1],
                 )
 
             def restore():
                 save_btn.remove_css_class("save-success")
                 save_btn.set_sensitive(True)
                 label.set_text("Save")
+                cheer_label.set_text("")
                 return False
 
             GLib.timeout_add(1400, restore)
@@ -985,9 +1013,16 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         content.append(side_revealer)
         content.append(scroller)
         toast_revealer.set_child(toast_label)
+        cheer_label = Gtk.Label()
+        cheer_label.set_halign(Gtk.Align.END)
+        cheer_label.set_valign(Gtk.Align.START)
+        cheer_label.set_margin_end(24)
+        cheer_label.set_margin_top(2)
+        cheer_label.set_can_target(False)
         overlay = Gtk.Overlay()
         overlay.set_child(content)
         overlay.add_overlay(toast_revealer)
+        overlay.add_overlay(cheer_label)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(search_bar)
         box.append(overlay)
