@@ -47,6 +47,7 @@ SELECT_COLOR = (0.15, 0.45, 0.95)
 
 CSS = b"""
 button.save-success { background: #2e9e4f; color: white; }
+headerbar button.tool-slim { padding-left: 7px; padding-right: 7px; min-width: 0; }
 label.toast-banner {
   background: rgba(35, 35, 40, 0.88);
   color: white;
@@ -583,6 +584,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def make_tool(name, icon, tip, markup=False, child=None):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
+            btn.add_css_class("tool-slim")
             if child is not None:
                 btn.set_child(child)
             else:
@@ -604,8 +606,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def tool_sep():
             sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-            sep.set_margin_start(4)
-            sep.set_margin_end(4)
+            sep.set_margin_start(2)
+            sep.set_margin_end(2)
             header.pack_start(sep)
 
         side_toggle = Gtk.ToggleButton()
@@ -617,19 +619,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         make_tool("select", None, "Select — click an item, drag to move (Esc deselects, Del removes)",
                   child=cursor_icon())
         tool_sep()
-        make_tool("pen", "✎", "Pen — freehand ink")
-
-        # Pen color: a swatch dropdown living right next to the pen.
-        color_btn = Gtk.MenuButton()
-        color_dot = Gtk.Label()
+        # Pen and its color share one button: the ✎ glyph is drawn in the
+        # current ink color; tapping the pen while it is ALREADY the active
+        # tool opens the palette. One slot, no hover needed — touch-friendly.
+        pen_btn = make_tool("pen", "✎", "Pen — freehand ink (tap again for colors)")
+        pen_label = pen_btn.get_child()
 
         def show_pen_color():
             rgb = "#%02x%02x%02x" % tuple(int(c * 255) for c in ed.pen_color)
-            color_dot.set_markup(f'<span foreground="{rgb}" size="large">●</span>')
+            pen_label.set_markup(f'<span foreground="{rgb}" weight="bold">✎</span>')
 
-        color_btn.set_child(color_dot)
-        color_btn.set_tooltip_text("Pen color")
         color_pop = Gtk.Popover()
+        color_pop.set_parent(pen_btn)
         color_box = Gtk.Box(spacing=2)
         for cname, rgb_t in PEN_COLORS:
             cb = Gtk.Button()
@@ -649,9 +650,23 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             cb.connect("clicked", pick)
             color_box.append(cb)
         color_pop.set_child(color_box)
-        color_btn.set_popover(color_pop)
         show_pen_color()
-        header.pack_start(color_btn)
+
+        pen_state = {"just_activated": False}
+        pen_btn.connect(
+            "toggled",
+            lambda b: b.get_active() and pen_state.__setitem__("just_activated", True),
+        )
+
+        def on_pen_clicked(_b):
+            # First tap arms the pen (toggled fired); a tap on the already-
+            # active pen opens the palette instead.
+            if pen_state["just_activated"]:
+                pen_state["just_activated"] = False
+            elif ed.tool == "pen":
+                color_pop.popup()
+
+        pen_btn.connect("clicked", on_pen_clicked)
 
         make_tool("highlight", '<span background="#f7d94c" foreground="#333333"> A </span>',
                   "Highlighter — drag across a region", markup=True)
@@ -799,7 +814,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             uri = Path(path).resolve().as_uri() + "\n"
             sp.run(["wl-copy", "-t", "text/uri-list"], input=uri.encode(), check=True)
-            toast("File copied — paste it into a chat, email, or folder")
+            toast(f"Copied {Path(path).name} — paste it into a chat, email, or folder")
+
+        def zip_copy(path):
+            import zipfile
+
+            zpath = Path(path).with_suffix(".zip")
+            with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(path, Path(path).name)
+            copy_file(zpath)
 
         def spawn(cmd):
             import subprocess as sp
@@ -814,6 +837,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         if _shutil.which("wl-copy"):
             add_share("Copy file", copy_file,
                       "Puts the file itself on the clipboard")
+            add_share("Zip & copy", zip_copy,
+                      "Zips the PDF and puts the .zip on the clipboard")
         add_share("Show in folder", lambda p: spawn(["xdg-open", str(Path(p).parent)]))
         share_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         share_box.append(flatten_check)
