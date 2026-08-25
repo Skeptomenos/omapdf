@@ -7,7 +7,8 @@ on purpose.
 
 ```bash
 git clone https://github.com/omapdf/omapdf && cd omapdf
-python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+python -m venv --system-site-packages .venv   # system PyGObject for the editor
+.venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest tests/ -q
 ```
 

@@ -61,11 +61,21 @@ today's ISO date below. Report adds `rect` (and `date`).
 Note: the image is inserted into page content, not as an annotation — it
 survives every viewer and doesn't need flattening.
 
+### ink
+```json
+{"op": "ink", "page": 1, "strokes": [[[100, 200], [120, 220], [140, 200]]],
+ "color": [0.75, 0.1, 0.1], "width": 2}
+```
+Freehand strokes as a real Ink annotation. `strokes` is a list of polylines
+(each 2+ `[x, y]` points); `color` is `[r, g, b]` in 0..1 (default black);
+`width` in points (default 2). Powers the editor's pen and its ✓/✕ stamps.
+Report adds the bounding `rect`.
+
 ## Extending
 
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
 entry here + a test. Keep ops small and composable; a batch is the unit of
 atomicity.
 
-Planned: `ink` (freehand strokes), `stamp` (library images: APPROVED, initials),
+Planned: `stamp` (library images: APPROVED, initials), `delete_annotation`,
 `redact`. See docs/roadmap.md.
