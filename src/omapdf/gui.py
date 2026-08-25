@@ -71,6 +71,10 @@ class Editor:
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
         self.pen_color = PEN_COLORS[1][1]
+        self.zoom_pct: float | None = None  # None = fit width
+        self.search_term = ""
+        self.search_hits: list[tuple[int, pymupdf.Rect]] = []
+        self.search_pos = -1
         if ops_file:
             self._load_proposals(ops_file)
 
@@ -224,8 +228,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
 
         def render_page():
-            z = 900 / ed.page().rect.width
+            if ed.zoom_pct is None:
+                avail = scroller.get_width() - 8 if scroller.get_width() > 100 else 900
+                z = avail / ed.page().rect.width
+            else:
+                z = ed.zoom_pct / 100 * (96 / 72)
             ed.zoom = z
+            zoom_dot.set_text("Fit" if ed.zoom_pct is None else f"{int(ed.zoom_pct)}%")
             pix = ed.page().get_pixmap(matrix=pymupdf.Matrix(z, z))
             ed.page_surface = cairo.ImageSurface.create_from_png(
                 io.BytesIO(pix.tobytes("png"))
@@ -234,6 +243,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             area.set_content_height(pix.height)
             page_label.set_text(f"{ed.page_no + 1} / {ed.doc.page_count}")
             update_nav()
+            select_thumb(ed.page_no)
             area.queue_draw()
             refresh_title()
 
@@ -254,6 +264,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
                 ctx.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
                 ctx.fill()
+            for i, (pno, rect) in enumerate(ed.search_hits):
+                if pno != ed.page_no:
+                    continue
+                current = i == ed.search_pos
+                ctx.set_source_rgba(1, 0.55, 0.05, 0.45 if current else 0.22)
+                ctx.rectangle(rect.x0 - 1, rect.y0 - 1, rect.width + 2, rect.height + 2)
+                ctx.fill()
+                if current:
+                    ctx.set_source_rgba(0.9, 0.4, 0, 0.9)
+                    ctx.set_line_width(1.4)
+                    ctx.rectangle(rect.x0 - 1, rect.y0 - 1, rect.width + 2, rect.height + 2)
+                    ctx.stroke()
 
         def draw_item(ctx, it):
             if it["kind"] == "sig":
@@ -518,6 +540,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             sep.set_margin_end(4)
             header.pack_start(sep)
 
+        side_toggle = Gtk.ToggleButton()
+        side_toggle.set_child(Gtk.Label(label="▤"))
+        side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
+        header.pack_start(side_toggle)
+        tool_sep()
+
         make_tool("select", "⬚", "Select — click an item, drag to move (Esc deselects, Del removes)")
         tool_sep()
         make_tool("pen", "✎", "Pen — freehand ink")
@@ -606,9 +634,37 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
         undo_b.connect("clicked", lambda _b: (ed.undo(), area.queue_draw(), refresh_title()))
         redo_b.connect("clicked", lambda _b: (ed.redo(), area.queue_draw(), refresh_title()))
+        zoom_dot = Gtk.Label()
+        zoom_btn = Gtk.MenuButton()
+        zoom_btn.set_child(zoom_dot)
+        zoom_btn.set_tooltip_text("Zoom (Ctrl+scroll, Ctrl+0 fits width)")
+        zoom_pop = Gtk.Popover()
+        zoom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        def set_zoom(pct):
+            ed.zoom_pct = pct
+            zoom_pop.popdown()
+            render_page()
+
+        for zlabel, zval in [("Fit width", None), ("50%", 50.0), ("75%", 75.0),
+                             ("100%", 100.0), ("125%", 125.0), ("150%", 150.0),
+                             ("200%", 200.0)]:
+            zb = Gtk.Button(label=zlabel)
+            zb.add_css_class("flat")
+            zb.connect("clicked", lambda _b, v=zval: set_zoom(v))
+            zoom_box.append(zb)
+        zoom_pop.set_child(zoom_box)
+        zoom_btn.set_popover(zoom_pop)
+
+        search_btn = Gtk.ToggleButton()
+        search_btn.set_child(Gtk.Image.new_from_icon_name("system-search-symbolic"))
+        search_btn.set_tooltip_text("Search (Ctrl+F)")
+
         header.pack_end(save_btn)
         header.pack_end(redo_b)
         header.pack_end(undo_b)
+        header.pack_end(zoom_btn)
+        header.pack_end(search_btn)
         win.set_titlebar(header)
 
         def celebrate_save():
@@ -657,6 +713,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.redo_stack.clear()
             ed.selected = None
             ed.doc = pymupdf.open(ed.path)
+            refresh_thumbs()
             render_page()
             toast(f"Saved {len(ops)} change(s)")
             celebrate_save()
@@ -671,6 +728,21 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             step = 10.0 if shift else 2.0
             if ctrl and keyval == Gdk.KEY_s:
                 on_save(None)
+            elif ctrl and keyval == Gdk.KEY_f:
+                search_btn.set_active(True)
+            elif ctrl and keyval in (Gdk.KEY_plus, Gdk.KEY_equal):
+                current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
+                ed.zoom_pct = min(400.0, current + 25)
+                render_page()
+            elif ctrl and keyval == Gdk.KEY_minus:
+                current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
+                ed.zoom_pct = max(25.0, current - 25)
+                render_page()
+            elif ctrl and keyval == Gdk.KEY_0:
+                ed.zoom_pct = None
+                render_page()
+            elif keyval == Gdk.KEY_F9:
+                side_toggle.set_active(not side_toggle.get_active())
             elif ctrl and keyval in (Gdk.KEY_z, Gdk.KEY_Z) and shift:
                 ed.redo()
             elif ctrl and keyval == Gdk.KEY_z:
@@ -703,11 +775,139 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         scroller = Gtk.ScrolledWindow()
         scroller.set_child(area)
         scroller.set_vexpand(True)
+        scroller.set_hexpand(True)
+
+        # -- thumbnails sidebar -------------------------------------------
+
+        side_list = Gtk.ListBox()
+        side_list.add_css_class("navigation-sidebar")
+
+        def refresh_thumbs():
+            side_list.remove_all()
+            for n in range(ed.doc.page_count):
+                pg = ed.doc[n]
+                s = 120 / pg.rect.width
+                pix = pg.get_pixmap(matrix=pymupdf.Matrix(s, s))
+                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
+                pic = Gtk.Picture.new_for_paintable(texture)
+                pic.set_size_request(120, int(pg.rect.height * s))
+                cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                cell.set_margin_top(6)
+                cell.append(pic)
+                cell.append(Gtk.Label(label=str(n + 1)))
+                side_list.append(cell)
+            select_thumb(ed.page_no)
+
+        def select_thumb(n):
+            row = side_list.get_row_at_index(n)
+            if row:
+                side_list.select_row(row)
+
+        def on_thumb(_lb, row):
+            if row and row.get_index() != ed.page_no:
+                ed.page_no = row.get_index()
+                ed.selected = None
+                render_page()
+
+        side_list.connect("row-activated", on_thumb)
+        side_scroll = Gtk.ScrolledWindow()
+        side_scroll.set_child(side_list)
+        side_scroll.set_size_request(150, -1)
+        side_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        side_revealer = Gtk.Revealer()
+        side_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
+        side_revealer.set_child(side_scroll)
+        side_toggle.connect("toggled", lambda b: side_revealer.set_reveal_child(b.get_active()))
+
+        # -- search -------------------------------------------------------
+
+        search_bar = Gtk.SearchBar()
+        search_entry = Gtk.SearchEntry()
+        search_entry.set_width_chars(32)
+        search_bar.set_child(search_entry)
+        search_bar.connect_entry(search_entry)
+
+        def run_search(term):
+            ed.search_term = term
+            ed.search_hits = [
+                (n, rect)
+                for n in range(ed.doc.page_count)
+                for rect in (ed.doc[n].search_for(term) if term else [])
+            ]
+            ed.search_pos = -1
+            if ed.search_hits:
+                goto_hit(0)
+            else:
+                toast(f"No matches for {term!r}" if term else "")
+                area.queue_draw()
+
+        def goto_hit(i):
+            ed.search_pos = i % len(ed.search_hits)
+            pno, rect = ed.search_hits[ed.search_pos]
+            if pno != ed.page_no:
+                ed.page_no = pno
+                ed.selected = None
+                render_page()
+            toast(f"Match {ed.search_pos + 1} of {len(ed.search_hits)}")
+
+            def scroll_to():
+                adj = scroller.get_vadjustment()
+                adj.set_value(max(0, rect.y0 * ed.zoom - scroller.get_height() / 3))
+                return False
+
+            GLib.idle_add(scroll_to)
+            area.queue_draw()
+
+        search_entry.connect("search-changed", lambda e: run_search(e.get_text().strip()))
+        search_entry.connect("activate", lambda _e: ed.search_hits and goto_hit(ed.search_pos + 1))
+        search_entry.connect(
+            "next-match", lambda _e: ed.search_hits and goto_hit(ed.search_pos + 1)
+        )
+        search_entry.connect(
+            "previous-match", lambda _e: ed.search_hits and goto_hit(ed.search_pos - 1)
+        )
+
+        def on_search_toggle(btn):
+            search_bar.set_search_mode(btn.get_active())
+            if btn.get_active():
+                search_entry.grab_focus()
+            else:
+                run_search("")
+
+        search_btn.connect("toggled", on_search_toggle)
+        search_bar.connect(
+            "notify::search-mode-enabled",
+            lambda bar, _p: search_btn.set_active(bar.get_search_mode()),
+        )
+
+        # Ctrl+scroll zoom on the page.
+        scroll_ctl = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL
+        )
+
+        def on_scroll(ctl, _dx, dy):
+            if ctl.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
+                current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
+                ed.zoom_pct = max(25.0, min(400.0, current - dy * 10))
+                render_page()
+                return True
+            return False
+
+        scroll_ctl.connect("scroll", on_scroll)
+        scroller.add_controller(scroll_ctl)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        content.append(side_revealer)
+        content.append(scroller)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(scroller)
+        box.append(search_bar)
+        box.append(content)
         box.append(toast_label)
         win.set_child(box)
 
+        refresh_thumbs()
+        if ed.doc.page_count > 1:
+            side_toggle.set_active(True)
         render_page()
         if ed.pending:
             toast(f"{len(ed.pending)} proposed change(s) loaded — drag to adjust, Save to apply")

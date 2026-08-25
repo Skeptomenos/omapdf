@@ -149,23 +149,15 @@ def cmd_sig(args):
 
 
 def cmd_open(args):
-    # Until the omapdf GUI lands, hand off to a concrete PDF viewer. Never
-    # fall back to xdg-open here: omapdf may itself be the desktop's default
-    # PDF handler, and xdg-open would loop straight back to us.
+    # Opening a PDF means the omapdf editor. OMAPDF_VIEWER forces an external
+    # viewer instead — but never xdg-open: omapdf may itself be the desktop's
+    # default PDF handler, and xdg-open would loop straight back to us.
     override = os.environ.get("OMAPDF_VIEWER")
     if override:
-        cmd = shlex.split(override)
+        cmd = [*shlex.split(override), args.pdf]
     else:
-        cmd = next(
-            ([v] for v in ("zathura", "evince", "papers", "okular") if shutil.which(v)),
-            None,
-        )
-        if cmd is None:
-            raise ValueError(
-                "no PDF viewer found (tried zathura, evince, papers, okular); "
-                "set OMAPDF_VIEWER to your viewer command"
-            )
-    subprocess.Popen([*cmd, args.pdf], start_new_session=True)
+        cmd = [sys.executable, "-m", "omapdf.cli", "edit", args.pdf]
+    subprocess.Popen(cmd, start_new_session=True)
 
 
 def cmd_edit(args):
