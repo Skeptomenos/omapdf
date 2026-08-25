@@ -24,7 +24,7 @@ omapdf = "omapdf.cli:main"
 omapdf-mcp = "omapdf.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/omapdf/omapdf"
+Homepage = "https://github.com/pbergin11/omapdf"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omapdf"]

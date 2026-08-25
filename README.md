@@ -125,7 +125,7 @@ the human when taste matters.
 ## Install
 
 ```bash
-git clone https://github.com/omapdf/omapdf && cd omapdf
+git clone https://github.com/pbergin11/omapdf && cd omapdf
 python -m venv --system-site-packages .venv    # system gi for the GTK editor
 .venv/bin/pip install -e '.[mcp]'
 ln -s "$PWD/.venv/bin/omapdf" ~/.local/bin/omapdf

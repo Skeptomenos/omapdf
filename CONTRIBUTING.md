@@ -6,7 +6,7 @@ on purpose.
 ## Setup
 
 ```bash
-git clone https://github.com/omapdf/omapdf && cd omapdf
+git clone https://github.com/pbergin11/omapdf && cd omapdf
 python -m venv --system-site-packages .venv   # system PyGObject for the editor
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest tests/ -q

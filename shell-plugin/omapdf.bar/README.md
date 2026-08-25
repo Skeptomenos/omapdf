@@ -2,7 +2,7 @@
 
 A PDF pill for the Omarchy top bar. Click it, pick a recent PDF (from
 `~/Downloads`, `~/Documents`, `~/Desktop` — newest first), and it opens:
-in the [omapdf](https://github.com/omapdf/omapdf) editor when installed
+in the [omapdf](https://github.com/pbergin11/omapdf) editor when installed
 (read, annotate, sign, ask your agent about it), otherwise in your system
 PDF viewer. When no PDFs are found it tells you via a notification.
 
