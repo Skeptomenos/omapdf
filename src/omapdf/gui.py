@@ -1023,6 +1023,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         ask_btn.add_css_class("tool-icon")
         ask_btn.set_valign(Gtk.Align.CENTER)
         ask_pop = Gtk.Popover()
+        # Shift left of the spark button so the popover stays inside the
+        # window instead of overhanging the neighboring tile.
+        ask_pop.set_has_arrow(False)
+        ask_pop.set_offset(-110, 4)
         ask_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         ask_box.set_margin_top(8)
         ask_box.set_margin_bottom(8)
@@ -1030,7 +1034,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         ask_box.set_margin_end(8)
         ask_entry = Gtk.Entry()
         ask_entry.set_placeholder_text("Ask about this document…")
-        ask_entry.set_width_chars(34)
+        ask_entry.set_width_chars(26)
         ask_entry.set_hexpand(True)
         ask_send = Gtk.Button(label="Ask")
         ask_send.add_css_class("suggested-action")
