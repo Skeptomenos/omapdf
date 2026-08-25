@@ -1030,13 +1030,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         ask_box.set_margin_end(8)
         ask_entry = Gtk.Entry()
         ask_entry.set_placeholder_text("Ask about this document…")
-        ask_entry.set_width_chars(38)
-        ask_hint = Gtk.Label(
-            label="Enter opens your default agent (omarchy agent) with the file"
-        )
+        ask_entry.set_width_chars(34)
+        ask_entry.set_hexpand(True)
+        ask_send = Gtk.Button(label="Ask")
+        ask_send.add_css_class("suggested-action")
+        ask_row = Gtk.Box(spacing=6)
+        ask_row.append(ask_entry)
+        ask_row.append(ask_send)
+        ask_hint = Gtk.Label(label="Opens your default agent with this file attached")
         ask_hint.add_css_class("dim-label")
         ask_hint.set_halign(Gtk.Align.START)
-        ask_box.append(ask_entry)
+        ask_box.append(ask_row)
         ask_box.append(ask_hint)
         ask_pop.set_child(ask_box)
         ask_btn.set_popover(ask_pop)
@@ -1059,6 +1063,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 toast("omarchy agent launcher not found on this system")
 
         ask_entry.connect("activate", on_ask)
+        ask_send.connect("clicked", on_ask)
 
         # -- share menu ---------------------------------------------------
 
