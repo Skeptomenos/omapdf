@@ -76,9 +76,20 @@ omapdf annotate doc.pdf --page 2 --match "termination clause"
 omapdf note doc.pdf --page 2 --at 400,300 --text "negotiate this"
 omapdf fill form.pdf --field tenant_name "Peter Bergin" --field rent "1800"
 
-omapdf sig add ~/sig.png                 # save your signature once
+omapdf sig draw                          # draw your signature once (GTK window)
+omapdf sig add ~/sig.png                 # …or import an image of it
 omapdf sign doc.pdf --page 4 --at 120,540 --date
 omapdf flatten doc.pdf -o final.pdf      # bake everything in for Acrobat folks
+```
+
+Signatures live in `~/.config/omapdf/signatures/`; `sig draw` again any time
+to replace one. `omapdf open doc.pdf` opens your PDF viewer (`OMAPDF_VIEWER`
+overrides), and `share/omapdf.desktop` lets you make omapdf the system's
+default PDF handler:
+
+```bash
+cp share/omapdf.desktop ~/.local/share/applications/
+xdg-mime default omapdf.desktop application/pdf
 ```
 
 Everything accepts `-o out.pdf` (default is in-place), `--dry-run`, and

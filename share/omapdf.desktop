@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=omapdf
+GenericName=PDF Viewer
+Comment=Read, annotate, and sign PDFs
+Exec=omapdf open %f
+Icon=application-pdf
+MimeType=application/pdf;
+Categories=Office;Viewer;
+Terminal=false

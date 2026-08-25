@@ -25,6 +25,7 @@ package() {
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm755 bin/omapdf-pick "$pkgdir/usr/bin/omapdf-pick"
+  install -Dm644 share/omapdf.desktop "$pkgdir/usr/share/applications/omapdf.desktop"
 
   # Omarchy bar widget, discoverable for manual linking into
   # ~/.config/omarchy/plugins/

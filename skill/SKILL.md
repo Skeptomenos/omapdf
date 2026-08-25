@@ -57,8 +57,9 @@ Signature images are managed per-user:
 omapdf sig list                      # saved signatures
 omapdf sig add ~/sig.png --name work # PNG, transparent background best
 ```
-If no signature is saved, ask the user for a PNG of their signature (they can
-draw one and capture it with omasnap) — never fabricate one.
+If no signature is saved, run `omapdf sig draw` — it opens a drawing window
+for the user to sign in (saved locally, reused thereafter; run it again to
+replace). Never fabricate a signature image.
 
 ## Finishing touches
 

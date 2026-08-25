@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__, engine, read, signature
@@ -125,6 +129,17 @@ def cmd_sig(args):
     if args.sig_cmd == "add":
         dest = signature.add(args.image, args.name)
         print(f"saved signature {args.name!r} -> {dest}")
+    elif args.sig_cmd == "draw":
+        from . import draw
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "signature.png"
+            if draw.run(out):
+                dest = signature.add(out, args.name)
+                print(f"saved signature {args.name!r} -> {dest}")
+            else:
+                print("cancelled — no signature saved", file=sys.stderr)
+                raise SystemExit(1)
     elif args.sig_cmd == "list":
         names = signature.list_names()
         print("\n".join(names) if names else "(no signatures saved — omapdf sig add <image.png>)")
@@ -134,8 +149,23 @@ def cmd_sig(args):
 
 
 def cmd_open(args):
-    # Until the omapdf GUI lands, hand off to the desktop's PDF viewer.
-    subprocess.Popen(["xdg-open", args.pdf], start_new_session=True)
+    # Until the omapdf GUI lands, hand off to a concrete PDF viewer. Never
+    # fall back to xdg-open here: omapdf may itself be the desktop's default
+    # PDF handler, and xdg-open would loop straight back to us.
+    override = os.environ.get("OMAPDF_VIEWER")
+    if override:
+        cmd = shlex.split(override)
+    else:
+        cmd = next(
+            ([v] for v in ("zathura", "evince", "papers", "okular") if shutil.which(v)),
+            None,
+        )
+        if cmd is None:
+            raise ValueError(
+                "no PDF viewer found (tried zathura, evince, papers, okular); "
+                "set OMAPDF_VIEWER to your viewer command"
+            )
+    subprocess.Popen([*cmd, args.pdf], start_new_session=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -207,6 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
     sig_sub = p.add_subparsers(dest="sig_cmd", required=True)
     sp = sig_sub.add_parser("add", help="save a signature image")
     sp.add_argument("image")
+    sp.add_argument("--name", default="default")
+    sp = sig_sub.add_parser("draw", help="draw a signature in a window and save it")
     sp.add_argument("--name", default="default")
     sig_sub.add_parser("list", help="list saved signatures")
     sp = sig_sub.add_parser("remove", help="delete a saved signature")
