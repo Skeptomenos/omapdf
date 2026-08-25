@@ -47,7 +47,25 @@ NOTE_SIZE = 20.0  # points, drawn sticky-note glyph
 SELECT_COLOR = (0.15, 0.45, 0.95)
 
 CSS = b"""
-button.save-success { background: #2e9e4f; color: white; }
+headerbar button.save-btn {
+  background: linear-gradient(180deg, #4a95ee, #2f74d0);
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  min-width: 58px;
+  min-height: 28px;
+  padding-left: 12px;
+  padding-right: 12px;
+  box-shadow: 0 1px 2px alpha(black, 0.35), inset 0 1px 0 alpha(white, 0.16);
+}
+headerbar button.save-btn:hover {
+  background: linear-gradient(180deg, #5aa2f4, #3a80dc);
+}
+headerbar button.save-btn:active { background: #2f74d0; }
+headerbar button.save-btn.save-success {
+  background: linear-gradient(180deg, #43b768, #2e9e4f);
+}
 headerbar button.tool-slim,
 headerbar menubutton.tool-slim > button {
   background: transparent;
@@ -70,8 +88,8 @@ headerbar separator {
   background: alpha(currentColor, 0.22);
   margin-top: 12px;
   margin-bottom: 12px;
-  margin-left: 3px;
-  margin-right: 3px;
+  margin-left: 1px;
+  margin-right: 1px;
 }
 label.toast-banner {
   background: rgba(35, 35, 40, 0.88);
@@ -913,7 +931,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             next_b.set_sensitive(ed.page_no < ed.doc.page_count - 1)
 
         save_btn = Gtk.Button(label="Save")
-        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("save-btn")
         save_btn.set_valign(Gtk.Align.CENTER)
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
