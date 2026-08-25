@@ -93,6 +93,13 @@ exactly, cite pages.
 then mark the changes on the newer file (highlight additions, strikeout
 removals) and summarize.
 
+**Send it somewhere** — the agent is the share sheet. When connected tools
+allow (email, Slack, etc.), "sign it and send it to X" is one flow: finalize
+(usually `flatten -o final.pdf`), attach, send — confirming recipient and
+message before sending, and reporting exactly what was sent. Humans also have
+a Share menu in `omapdf edit` (email attach, LocalSend, copy-file,
+show-in-folder).
+
 ## Discipline
 
 - **Read the whole document before acting.** Every recipe starts with read.

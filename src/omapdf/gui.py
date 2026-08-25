@@ -563,6 +563,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             da = Gtk.DrawingArea()
             da.set_content_width(16)
             da.set_content_height(16)
+            da.set_halign(Gtk.Align.CENTER)
+            da.set_valign(Gtk.Align.CENTER)
 
             def dr(widget, ctx, _w, _h):
                 c = widget.get_color()
@@ -747,7 +749,79 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_btn.set_child(Gtk.Image.new_from_icon_name("system-search-symbolic"))
         search_btn.set_tooltip_text("Search (Ctrl+F)")
 
+        # -- share menu ---------------------------------------------------
+
+        import shutil as _shutil
+
+        share_btn = Gtk.MenuButton(label="Share")
+        share_btn.set_tooltip_text("Send this PDF somewhere")
+        share_pop = Gtk.Popover()
+        share_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        flatten_check = Gtk.CheckButton(label="Flatten copy first")
+        flatten_check.set_tooltip_text(
+            "Bake annotations and form fields in, so every viewer shows them"
+        )
+
+        def share_target():
+            if ed.pending:
+                toast("Unsaved changes — Save before sharing")
+                return None
+            if flatten_check.get_active():
+                out = str(Path(ed.path).with_name(Path(ed.path).stem + "-final.pdf"))
+                engine.flatten(ed.path, output=out)
+                toast(f"Sharing flattened copy: {Path(out).name}")
+                return out
+            return ed.path
+
+        def share_action(fn):
+            def go(_b):
+                share_pop.popdown()
+                path = share_target()
+                if path:
+                    try:
+                        fn(path)
+                    except Exception as exc:
+                        toast(f"Share failed: {exc}")
+            return go
+
+        def add_share(label, fn, tooltip=None):
+            b = Gtk.Button(label=label)
+            b.add_css_class("flat")
+            b.set_halign(Gtk.Align.FILL)
+            b.get_child().set_halign(Gtk.Align.START)
+            if tooltip:
+                b.set_tooltip_text(tooltip)
+            b.connect("clicked", share_action(fn))
+            share_box.append(b)
+
+        def copy_file(path):
+            import subprocess as sp
+
+            uri = Path(path).resolve().as_uri() + "\n"
+            sp.run(["wl-copy", "-t", "text/uri-list"], input=uri.encode(), check=True)
+            toast("File copied — paste it into a chat, email, or folder")
+
+        def spawn(cmd):
+            import subprocess as sp
+
+            sp.Popen(cmd, start_new_session=True)
+
+        add_share("Email…", lambda p: spawn(["xdg-email", "--attach", p]),
+                  "Open your mail client with the PDF attached")
+        if _shutil.which("localsend"):
+            add_share("LocalSend…", lambda p: spawn(["localsend", p]),
+                      "Send to a nearby device")
+        if _shutil.which("wl-copy"):
+            add_share("Copy file", copy_file,
+                      "Puts the file itself on the clipboard")
+        add_share("Show in folder", lambda p: spawn(["xdg-open", str(Path(p).parent)]))
+        share_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        share_box.append(flatten_check)
+        share_pop.set_child(share_box)
+        share_btn.set_popover(share_pop)
+
         header.pack_end(save_btn)
+        header.pack_end(share_btn)
         header.pack_end(redo_b)
         header.pack_end(undo_b)
         header.pack_end(zoom_btn)
