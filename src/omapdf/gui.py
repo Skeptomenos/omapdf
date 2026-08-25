@@ -270,10 +270,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             dot = " •" if ed.pending else ""
             win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
 
+        def fit_width_zoom():
+            # The real viewport width: hadjustment page-size accounts for the
+            # sidebar and window size; fall back before first allocation.
+            avail = scroller.get_hadjustment().get_page_size()
+            if avail < 100:
+                avail = scroller.get_width()
+            if avail < 100:
+                avail = 900
+            return (avail - 4) / ed.page().rect.width
+
         def render_page():
             if ed.zoom_pct is None:
-                avail = scroller.get_width() - 8 if scroller.get_width() > 100 else 900
-                z = avail / ed.page().rect.width
+                z = fit_width_zoom()
             else:
                 z = ed.zoom_pct / 100 * (96 / 72)
             ed.zoom = z
@@ -1218,6 +1227,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         scroll_ctl.connect("scroll", on_scroll)
         scroller.add_controller(scroll_ctl)
+
+        # Keep fit-width honest when the viewport changes — sidebar sliding
+        # in or out, window resizes. Debounced so the revealer animation
+        # causes one re-render, not thirty.
+        fit_state = {"pending": False}
+
+        def on_viewport_change(_adj, _p):
+            if ed.zoom_pct is not None or fit_state["pending"]:
+                return
+            fit_state["pending"] = True
+
+            def rerender():
+                fit_state["pending"] = False
+                if ed.zoom_pct is None and abs(fit_width_zoom() - ed.zoom) > 0.004:
+                    render_page()
+                return False
+
+            GLib.timeout_add(130, rerender)
+
+        scroller.get_hadjustment().connect("notify::page-size", on_viewport_change)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         content.append(side_revealer)
