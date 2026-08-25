@@ -465,35 +465,36 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     area_sz = max(1.0, r.width * r.height)
                     if best is None or area_sz < best[2]:
                         best = (a.type[1], (a.info.get("content") or "").strip(), area_sz)
-            if best is None:
+            # Clickability means "there is a comment to read": annotations
+            # without text (bare highlights, ink) don't pop anything.
+            if best is None or not best[1]:
                 return False
             kind, content, _ = best
+            titles = {"Text": "Comment", "FreeText": "Text box",
+                      "Highlight": "Highlight comment"}
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
             rect.x, rect.y, rect.width, rect.height = int(px * ed.zoom), int(py * ed.zoom), 1, 1
             pop.set_pointing_to(rect)
+            # Near the right edge, open leftward so the popover stays over
+            # the page instead of spilling into the sidebar/window edge.
+            if px > ed.page().rect.width * 0.72:
+                pop.set_position(Gtk.PositionType.LEFT)
             vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             vbox.set_margin_top(8)
             vbox.set_margin_bottom(8)
             vbox.set_margin_start(10)
             vbox.set_margin_end(10)
             title = Gtk.Label()
-            title.set_markup(f"<b>{GLib.markup_escape_text(kind)}</b>")
+            title.set_markup(f"<b>{GLib.markup_escape_text(titles.get(kind, kind))}</b>")
             title.set_halign(Gtk.Align.START)
             vbox.append(title)
-            if content:
-                body = Gtk.Label(label=content)
-                body.set_wrap(True)
-                body.set_max_width_chars(44)
-                body.set_halign(Gtk.Align.START)
-                body.set_selectable(True)
-                vbox.append(body)
-            else:
-                hint = Gtk.Label(label="(no comment text)")
-                hint.add_css_class("dim-label")
-                hint.set_halign(Gtk.Align.START)
-                vbox.append(hint)
+            body = Gtk.Label(label=content)
+            body.set_wrap(True)
+            body.set_max_width_chars(44)
+            body.set_halign(Gtk.Align.START)
+            vbox.append(body)
             pop.set_child(vbox)
             # Defer past the in-flight click gesture: popping up during the
             # press can get the popover dismissed by its own click's release.
@@ -1023,6 +1024,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         keys = Gtk.EventControllerKey()
 
         def on_key(_c, keyval, _code, state):
+            # Runs in capture phase so arrows reach us before the scroll
+            # view eats them — but typing in any entry must stay untouched.
+            focus = win.get_focus()
+            if focus is not None and isinstance(focus, (Gtk.Text, Gtk.Editable)):
+                return False
             ctrl = state & Gdk.ModifierType.CONTROL_MASK
             shift = state & Gdk.ModifierType.SHIFT_MASK
             step = 10.0 if shift else 2.0
@@ -1080,6 +1086,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             return True
 
         keys.connect("key-pressed", on_key)
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         win.add_controller(keys)
 
         scroller = Gtk.ScrolledWindow()
@@ -1195,39 +1202,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             Gtk.EventControllerScrollFlags.VERTICAL
         )
 
-        flip = {"accum": 0.0, "t": 0}
-
         def on_scroll(ctl, _dx, dy):
             if ctl.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = max(25.0, min(400.0, current - dy * 10))
                 render_page()
                 return True
-            # Scrolling past the page edge flows onto the neighboring page.
-            adj = scroller.get_vadjustment()
-            at_bottom = adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2
-            at_top = adj.get_value() <= 2
-            now = GLib.get_monotonic_time()
-            if now - flip["t"] > 400_000:
-                flip["accum"] = 0.0
-            flip["t"] = now
-            if dy > 0 and at_bottom and ed.page_no < ed.doc.page_count - 1:
-                flip["accum"] += dy
-                if flip["accum"] >= 2:
-                    flip["accum"] = 0.0
-                    go(1)
-                    GLib.idle_add(lambda: (adj.set_value(0), False)[1])
-                return True
-            if dy < 0 and at_top and ed.page_no > 0:
-                flip["accum"] -= dy
-                if flip["accum"] >= 2:
-                    flip["accum"] = 0.0
-                    go(-1)
-                    GLib.idle_add(
-                        lambda: (adj.set_value(adj.get_upper() - adj.get_page_size()), False)[1]
-                    )
-                return True
-            flip["accum"] = 0.0
             return False
 
         scroll_ctl.connect("scroll", on_scroll)
