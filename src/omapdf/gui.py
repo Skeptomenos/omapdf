@@ -460,7 +460,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # -- text entry popover -------------------------------------------
 
-        def prompt_entry(px, py, placeholder, on_text):
+        def prompt_entry(px, py, placeholder, on_text, initial=""):
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
@@ -469,6 +469,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             entry = Gtk.Entry()
             entry.set_placeholder_text(placeholder)
             entry.set_width_chars(30)
+            entry.set_text(initial)
             pop.set_child(entry)
 
             def commit(_e):
@@ -477,7 +478,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 if text:
                     ed.checkpoint()
                     item = on_text(text)
-                    ed.pending.append(item)
+                    if not any(p is item for p in ed.pending):
+                        ed.pending.append(item)
                     ed.selected = item
                     area.queue_draw()
                     refresh_title()
@@ -496,6 +498,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             prompt_entry(px, py, "Sticky note comment, then Enter", lambda t: {
                 "kind": "note", "page": ed.page_no, "x": px, "y": py, "text": t,
             })
+
+        def edit_pending(item):
+            """Re-open a pending note/text for editing, pre-filled."""
+
+            def apply_text(t):
+                item["text"] = t
+                return item
+
+            label = "Edit note — Enter to update" if item["kind"] == "note" \
+                else "Edit text — Enter to update"
+            prompt_entry(item["x"], item["y"], label, apply_text,
+                         initial=item["text"])
 
         def show_saved_annot(px, py):
             """Click on an already-saved annotation: pop open its content."""
@@ -560,12 +574,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         click = Gtk.GestureClick()
 
-        def on_click(_g, _n, cx, cy):
+        def on_click(_g, n_press, cx, cy):
             px, py = cx / ed.zoom, cy / ed.zoom
+            hit_item = ed.hit(px, py)
             if ed.tool == "text":
-                prompt_text(px, py)
+                if hit_item and hit_item["kind"] == "text":
+                    edit_pending(hit_item)
+                else:
+                    prompt_text(px, py)
             elif ed.tool == "note":
-                prompt_note(px, py)
+                if hit_item and hit_item["kind"] == "note":
+                    edit_pending(hit_item)
+                else:
+                    prompt_note(px, py)
             elif ed.tool == "sign":
                 if ed._ensure_sig() is None:
                     toast("No signature saved — run: omapdf sig draw")
@@ -583,17 +604,42 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ed.tool == "cross":
                 add_stamp(CROSS, CROSS_COLOR, px, py)
             else:
-                ed.selected = ed.hit(px, py)
+                ed.selected = hit_item
                 if ed.selected is None:
                     try:
                         show_saved_annot(px, py)
                     except Exception as exc:
                         toast(f"Couldn't open annotation: {exc}")
+                elif n_press >= 2 and ed.selected["kind"] in ("note", "text"):
+                    edit_pending(ed.selected)
             area.queue_draw()
             refresh_title()
 
         click.connect("pressed", on_click)
         area.add_controller(click)
+
+        # Hovering a note/text (pending or saved) previews its content.
+        area.set_has_tooltip(True)
+
+        def on_tooltip(_w, tx, ty, _kb, tooltip):
+            px, py = tx / ed.zoom, ty / ed.zoom
+            it = ed.hit(px, py)
+            if it and it.get("kind") in ("note", "text") and it.get("text"):
+                tooltip.set_text(it["text"])
+                return True
+            try:
+                for a in ed.page().annots() or []:
+                    r = a.rect
+                    if r.x0 - 4 <= px <= r.x1 + 4 and r.y0 - 4 <= py <= r.y1 + 4:
+                        content = (a.info.get("content") or "").strip()
+                        if content:
+                            tooltip.set_text(content)
+                            return True
+            except Exception:
+                pass
+            return False
+
+        area.connect("query-tooltip", on_tooltip)
 
         drag = Gtk.GestureDrag()
 
