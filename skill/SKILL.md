@@ -1,91 +1,115 @@
 ---
 name: omapdf
-description: Annotate, fill, and sign PDFs with omapdf. Use whenever the user asks to highlight/underline/comment on a PDF, fill a PDF form, sign a PDF, stamp a signature or date, flatten a PDF, or extract a PDF's text/fields for review. Triggers: "sign this pdf", "fill out this form", "highlight in the pdf", "annotate", "add a note to the pdf", "review this contract/lease", "flatten", "signature".
+description: Do anything with a PDF that a person would ask an assistant to do — review and highlight what matters, mark up or annotate anything, fill forms, sign, initial, stamp, redline, cross out, flatten, extract or summarize with page citations. Triggers: any request involving a PDF — "sign this", "fill this out", "highlight everything I need to know", "mark up", "go through this document", "review this contract/lease/agreement", "annotate", "add a note", "cross out", "check off", "redline", "flatten", "what does this PDF say", "signature".
 ---
 
-# omapdf — PDF annotation and signing
+# omapdf — the PDF assistant playbook
 
-omapdf edits PDFs through a JSON op engine. Use the `omapdf` CLI (preferred in
-terminal sessions) or the MCP tools if the `omapdf` MCP server is connected —
-they are the same engine and can be mixed freely.
+omapdf edits PDFs through a JSON op engine (`omapdf` CLI; the `omapdf` MCP
+server exposes the same engine). Treat ANY request a person would make about
+a paper document as executable: if a human with a pen and a highlighter could
+do it, you can do it — and you can also *look at the page* to work precisely.
 
-## Workflow: always read before you write
+Ops: `highlight` (styles: highlight/underline/strikeout/squiggly), `note`
+(sticky comment), `text_box` (visible text), `fill_field`, `place_signature`,
+`ink` (freehand strokes / marks). Coordinates are PDF points, origin
+top-left; pages are 1-based; bboxes from `read` feed straight back into ops.
 
-1. **Read the document first** to get real coordinates and field names:
-   ```bash
-   omapdf read doc.pdf              # pages, text blocks + bboxes, form fields
-   omapdf read doc.pdf --text-only  # just the words (cheap first pass)
-   omapdf fields form.pdf           # fillable fields with names and rects
-   ```
-   Coordinates are PDF points, origin **top-left** — bboxes from `read` can be
-   passed straight back into ops.
+## The precision ladder
 
-2. **Act.** Single edits have dedicated commands; batch edits go through
-   `apply` with an ops file (preferred for 2+ edits — it's atomic):
-   ```bash
-   omapdf annotate doc.pdf --page 2 --match "exact text from read" 
-   omapdf note doc.pdf --page 2 --at 400,300 --text "Check this"
-   omapdf fill form.pdf --field tenant_name "Jane Doe" --field rent "1800"
-   omapdf apply doc.pdf --ops - <<'EOF'
-   [{"op": "highlight", "page": 1, "match": "auto-renewal"},
-    {"op": "note", "page": 1, "at": [450, 200], "text": "30-day notice required"}]
-   EOF
-   ```
-   All edit commands accept `-o out.pdf` (default edits in place), `--dry-run`,
-   and `--json` (returns each op with its resolved geometry).
+The signature flow taught the pattern: **anchor → look → dry-run → verify →
+(if aesthetic/consequential) hand a ghost to the human.** Climb only as high
+as the task needs:
 
-3. **Verify** by re-reading or checking the `--json` report. `highlight
-   --match` fails loudly if the text isn't found — re-read the page and match
-   the document's actual wording (search is exact, not fuzzy).
+1. **Text anchors.** `omapdf read doc.pdf` gives every text block + bbox and
+   every form field + rect. `highlight --match` needs no coordinates at all.
+   Compute positions *relative to* known bboxes (e.g. signature goes just
+   above the "SIGNATURE" label's bbox; a check goes at the checkbox rect).
+2. **Use your eyes.** When text blocks don't pin it down (image-heavy pages,
+   empty regions, "next to the logo", column layouts):
+   `omapdf snapshot doc.pdf --page N --grid 50` → Read the PNG → the labeled
+   grid IS the ops coordinate system. Pick numbers off it.
+3. **Dry-run.** Every edit command takes `--dry-run --json` and returns
+   resolved geometry without writing. Sanity-check rects fit the page and
+   don't cover content you must keep readable.
+4. **Verify after writing.** For anything nontrivial, write to a copy
+   (`-o out.pdf`), then `omapdf snapshot out.pdf --page N` (no grid) and
+   *look at the result*. Wrong spot, overlapping text, too big? Fix the op
+   and re-apply to a fresh copy from the original. Never ship what you
+   haven't seen.
+5. **Ghost handoff.** For placements where taste matters (signatures, stamps
+   on a designed page) or when the user should have final say: write the
+   proposed ops to JSON and `setsid -f omapdf edit doc.pdf --ops proposal.json`
+   — they load as selected, draggable overlays; the user nudges and Saves.
 
-### When coordinates are ambiguous: look at the page
+## Task recipes
 
-`omapdf snapshot doc.pdf --page N --grid 50` renders the page to a PNG with a
-labeled coordinate grid in ops coordinates. Read the image, then place ops by
-the grid numbers you see. Use this whenever the text blocks alone don't pin
-down a location (image-heavy pages, empty regions, "put it next to the logo").
+**"Go through this and highlight everything I need to know"** — the flagship.
+1. `omapdf read doc.pdf --text-only` — read the WHOLE document, every page.
+2. Identify what a diligent professional would flag: money (amounts, fees,
+   penalties), dates and deadlines, obligations ("shall", "must", "agrees
+   to"), auto-renewals, termination/cancellation terms, liability and
+   indemnity, anything unusual or one-sided, anything contradicting what the
+   user told you.
+3. One atomic batch: `highlight` each key phrase (`--match` uses exact text —
+   copy it verbatim from the read); add a `note` beside each non-obvious one
+   saying WHY it matters.
+4. Deliver a page-anchored summary in chat: "p2: 4% late fee after 5 days
+   (highlighted); p5: auto-renews unless cancelled 60 days out (highlighted +
+   note)…". The markup and the summary are one deliverable.
 
-## Signing — requires human confirmation
+**"Mark up / annotate all X"** — `highlight --match` marks every occurrence
+on a page; loop the pages where `read` shows the term. Verify the count you
+report matches the rects returned.
 
-Placing a signature is consequential. Unless the user has already given an
-explicit, specific instruction to sign (which page, roughly where):
+**Fill a form** — `omapdf fields form.pdf` for names/types/rects. Fill every
+field you have facts for in one `apply` batch. Never invent values: leave
+unknown fields empty and list them for the user. No AcroForm fields? Use
+`text_box` placed by the ladder (label bboxes → grid snapshot).
 
-1. Find the signature line: `omapdf read` and look for text like
-   "Signature:" / "Sign here" — place the signature just above/right of it.
-2. **Dry-run first** and show the user the placement:
-   ```bash
-   omapdf sign doc.pdf --page 4 --at 120,540 --width 180 --date --dry-run --json
-   ```
-3. On approval, run again without `--dry-run`. Offer `omapdf open doc.pdf`
-   so they can eyeball the result.
+**Sign / initial** — signature lines come from field rects (`signature`
+type), "SIGNATURE"/"Sign here"/"X___" labels, or the grid snapshot. Dry-run,
+then apply, then verify with a snapshot. "Initial every page": a saved
+`initials` signature (`omapdf sig add ... --name initials`) placed at a
+consistent corner on every page in one batch. Never place a signature the
+user hasn't asked for; offer the ghost handoff when placement is aesthetic.
 
-Better still, hand the placement to the human as a draggable ghost: write the
-proposed ops to a JSON file and run `omapdf edit doc.pdf --ops proposal.json`
-(launch it detached: `setsid -f omapdf edit …`). The editor loads them as
-selected, moveable overlays — the user drags/nudges and hits Save. Prefer this
-over coordinate back-and-forth whenever a GUI session is available.
+**Redline / propose edits** — `strikeout` the old wording (`--match`), put
+replacement text nearby via `text_box`, and a `note` with the rationale.
+Recipients see standard annotations in any viewer.
 
-Signature images are managed per-user:
-```bash
-omapdf sig list                      # saved signatures
-omapdf sig add ~/sig.png --name work # PNG, transparent background best
-```
-If no signature is saved, run `omapdf sig draw` — it opens a drawing window
-for the user to sign in (saved locally, reused thereafter; run it again to
-replace). Never fabricate a signature image.
+**Check off / cross out lists** — `ink` with a check
+(`[[[x,y+7],[x+4.5,y+12],[x+14,y]]]`, green `[0.18,0.62,0.31]`) or cross
+(two diagonal strokes, red) at each checkbox rect from `read`.
 
-## Finishing touches
+**Stamp / label** — `text_box` for "APPROVED", "DRAFT", "PAID", dates;
+red/large for stamps. Position by the ladder.
 
-- `omapdf flatten doc.pdf -o final.pdf` — bakes annotations + form fields into
-  page content. Use when the recipient needs a non-editable copy or uses a
-  viewer that mishandles annotations. Keep the unflattened original.
-- Annotations are real PDF annotations — Acrobat/Preview users see them as
-  normal comments. Prefer them over text_box overlays for review feedback.
+**Extract / summarize / answer questions** — `read --text-only` and answer
+with page citations. You are also the fastest way to *find* things: quote
+exactly, cite pages.
 
-## Cautions
+**Compare two versions** — `read --text-only` both, diff the text yourself,
+then mark the changes on the newer file (highlight additions, strikeout
+removals) and summarize.
 
-- Default is **in-place** editing: pass `-o` when the user would want the
-  original kept (signing and flattening: recommend `-o` proactively).
-- Password-protected PDFs are refused; tell the user to decrypt first.
-- This tool does visual signing. For cryptographic (certificate) signatures,
-  say it's on omapdf's roadmap — don't improvise one.
+## Discipline
+
+- **Read the whole document before acting.** Every recipe starts with read.
+- **Batch edits into one `apply`** — it's atomic; a bad op aborts the batch
+  before anything is written.
+- **Exact match gotcha:** PDF text may use ligatures (ﬁ, ﬂ) — if a match
+  fails, try a shorter distinctive phrase avoiding fi/fl words; the error is
+  actionable and `read` shows the true text.
+- **Keep originals.** Use `-o` for signing, flattening, and anything the
+  user may want to redo; edit in place only for additive annotation the user
+  asked for on that file.
+- **Finish for sending:** offer `omapdf flatten out.pdf -o final.pdf` when
+  the copy is going to someone else; keep the unflattened version.
+- Password-protected PDFs are refused — ask the user to decrypt.
+- No signature saved? `omapdf sig draw` opens the drawing window. Never
+  fabricate a signature, never sign unbidden, never invent form data.
+- Visual signing only; cryptographic (certificate) signing is on the
+  roadmap — say so, don't improvise it.
+- `omapdf open doc.pdf` opens the omapdf editor for the user (detach GUI
+  launches: `setsid -f`).
