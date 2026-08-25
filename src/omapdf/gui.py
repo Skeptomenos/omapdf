@@ -91,20 +91,55 @@ class Editor:
         return self.doc[self.page_no]
 
     def checkpoint(self):
-        self.undo_stack.append(copy.deepcopy(self.pending))
+        self.undo_stack.append({"kind": "pending", "pending": copy.deepcopy(self.pending)})
         self.redo_stack.clear()
 
-    def undo(self):
-        if self.undo_stack:
-            self.redo_stack.append(self.pending)
-            self.pending = self.undo_stack.pop()
-            self.selected = None
+    def record_save(self, file_before: bytes, pending_before: list[dict]):
+        """A save is an undoable step too: undoing it reverts the file and
+        resurrects the saved items as editable ghosts."""
+        self.undo_stack.append({
+            "kind": "save",
+            "file_before": file_before,
+            "file_after": Path(self.path).read_bytes(),
+            "pending_before": pending_before,
+        })
+        self.redo_stack.clear()
 
-    def redo(self):
-        if self.redo_stack:
-            self.undo_stack.append(self.pending)
-            self.pending = self.redo_stack.pop()
+    def _restore_file(self, data: bytes):
+        self.doc.close()
+        Path(self.path).write_bytes(data)
+        self.doc = pymupdf.open(self.path)
+
+    def undo(self) -> bool:
+        """Returns True when the file itself changed (a save was reverted)."""
+        if not self.undo_stack:
+            return False
+        entry = self.undo_stack.pop()
+        if entry["kind"] == "pending":
+            self.redo_stack.append({"kind": "pending", "pending": self.pending})
+            self.pending = entry["pending"]
             self.selected = None
+            return False
+        self.redo_stack.append(entry)
+        self._restore_file(entry["file_before"])
+        self.pending = copy.deepcopy(entry["pending_before"])
+        self.selected = None
+        return True
+
+    def redo(self) -> bool:
+        if not self.redo_stack:
+            return False
+        entry = self.redo_stack.pop()
+        if entry["kind"] == "pending":
+            self.undo_stack.append({"kind": "pending", "pending": self.pending})
+            self.pending = entry["pending"]
+            self.selected = None
+            return False
+        self.undo_stack.append(entry)
+        self._restore_file(entry["file_after"])
+        self.pending = []
+        self.selected = None
+        return True
 
     def sig_aspect(self) -> float:
         surface = self._ensure_sig()
@@ -637,10 +672,29 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         save_btn.add_css_class("suggested-action")
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
-        undo_b.set_tooltip_text("Undo (Ctrl+Z)")
+        undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
-        undo_b.connect("clicked", lambda _b: (ed.undo(), area.queue_draw(), refresh_title()))
-        redo_b.connect("clicked", lambda _b: (ed.redo(), area.queue_draw(), refresh_title()))
+
+        def do_undo():
+            was_save = ed.undo()
+            if was_save:
+                refresh_thumbs()
+                render_page()
+                toast("Save reverted — the items are editable ghosts again")
+            area.queue_draw()
+            refresh_title()
+
+        def do_redo():
+            was_save = ed.redo()
+            if was_save:
+                refresh_thumbs()
+                render_page()
+                toast("Save re-applied")
+            area.queue_draw()
+            refresh_title()
+
+        undo_b.connect("clicked", lambda _b: do_undo())
+        redo_b.connect("clicked", lambda _b: do_redo())
         zoom_dot = Gtk.Label()
         zoom_btn = Gtk.MenuButton()
         zoom_btn.set_child(zoom_dot)
@@ -729,6 +783,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 toast("Nothing to save")
                 return
             ops = ed.to_ops()
+            file_before = Path(ed.path).read_bytes()
+            pending_before = copy.deepcopy(ed.pending)
             ed.doc.close()
             try:
                 engine.apply(ed.path, ops)
@@ -737,14 +793,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.doc = pymupdf.open(ed.path)
                 render_page()
                 return
-            ed.pending.clear()
-            ed.undo_stack.clear()
-            ed.redo_stack.clear()
-            ed.selected = None
             ed.doc = pymupdf.open(ed.path)
+            ed.record_save(file_before, pending_before)
+            ed.pending.clear()
+            ed.selected = None
             refresh_thumbs()
             render_page()
-            toast(f"Saved {len(ops)} change(s)")
+            toast(f"Saved {len(ops)} change(s) — Ctrl+Z reverts the save")
             celebrate_save()
 
         save_btn.connect("clicked", on_save)
@@ -773,11 +828,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif keyval == Gdk.KEY_F9:
                 side_toggle.set_active(not side_toggle.get_active())
             elif ctrl and keyval in (Gdk.KEY_z, Gdk.KEY_Z) and shift:
-                ed.redo()
+                do_redo()
             elif ctrl and keyval == Gdk.KEY_z:
-                ed.undo()
+                do_undo()
             elif ctrl and keyval == Gdk.KEY_y:
-                ed.redo()
+                do_redo()
             elif keyval == Gdk.KEY_Escape:
                 ed.selected = None
             elif keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and ed.selected:
