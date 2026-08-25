@@ -2,6 +2,8 @@
 
 **Preview.app for Linux — but your agent can drive it.**
 
+![omapdf — read, annotate, sign, or hand it to your agent](docs/assets/hero.png)
+
 omapdf is an agent-native PDF tool: a fast GTK4 **editor** for reading,
 annotating, and signing; a scriptable **CLI**; an **MCP server** for AI
 agents; and an **Omarchy** integration that ties them all to the operating
