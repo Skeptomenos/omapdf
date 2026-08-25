@@ -456,18 +456,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def show_saved_annot(px, py):
             """Click on an already-saved annotation: pop open its content."""
             best = None
+            # Copy plain values inside the loop: PyMuPDF annot objects can go
+            # stale once the generator advances.
             for a in ed.page().annots() or []:
                 r = a.rect
                 pad = 6
                 if r.x0 - pad <= px <= r.x1 + pad and r.y0 - pad <= py <= r.y1 + pad:
                     area_sz = max(1.0, r.width * r.height)
-                    if best is None or area_sz < best[1]:
-                        best = (a, area_sz)
+                    if best is None or area_sz < best[2]:
+                        best = (a.type[1], (a.info.get("content") or "").strip(), area_sz)
             if best is None:
                 return False
-            annot = best[0]
-            kind = annot.type[1]
-            content = (annot.info.get("content") or "").strip()
+            kind, content, _ = best
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
@@ -495,7 +495,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 hint.set_halign(Gtk.Align.START)
                 vbox.append(hint)
             pop.set_child(vbox)
-            pop.popup()
+            # Defer past the in-flight click gesture: popping up during the
+            # press can get the popover dismissed by its own click's release.
+            GLib.idle_add(lambda: (pop.popup(), False)[1])
             return True
 
         # -- input --------------------------------------------------------
@@ -538,7 +540,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             else:
                 ed.selected = ed.hit(px, py)
                 if ed.selected is None:
-                    show_saved_annot(px, py)
+                    try:
+                        show_saved_annot(px, py)
+                    except Exception as exc:
+                        toast(f"Couldn't open annotation: {exc}")
             area.queue_draw()
             refresh_title()
 
