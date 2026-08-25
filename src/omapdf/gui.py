@@ -82,7 +82,8 @@ headerbar menubutton.tool-slim > button:hover { background: alpha(currentColor, 
 headerbar button.tool-slim:active,
 headerbar menubutton.tool-slim > button:active { background: alpha(currentColor, 0.16); }
 headerbar button.tool-slim:checked { background: alpha(#3584e4, 0.32); }
-headerbar button.tool-icon { padding: 5px; min-width: 28px; min-height: 28px; }
+headerbar button.tool-icon,
+headerbar menubutton.tool-icon > button { padding: 5px; min-width: 28px; min-height: 28px; }
 headerbar .page-indicator { opacity: 0.85; font-weight: 500; }
 headerbar separator {
   background: alpha(currentColor, 0.22);
@@ -760,6 +761,16 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             _path(ctx, [(3.0, 15.2), (15.0, 15.2)])
             ctx.stroke()
 
+        def paint_share(ctx, fg):
+            # Arrow rising out of a tray — the universal "send it somewhere".
+            _ink(ctx, fg, 1.6)
+            _path(ctx, [(4.0, 9.5), (4.0, 14.5), (14.0, 14.5), (14.0, 9.5)])
+            ctx.stroke()
+            _path(ctx, [(9.0, 3.0), (9.0, 11.0)])
+            ctx.stroke()
+            _path(ctx, [(6.2, 5.6), (9.0, 2.8), (11.8, 5.6)])
+            ctx.stroke()
+
         def paint_check(ctx, _fg):
             _ink(ctx, (*CHECK_COLOR, 1.0), 2.3)
             _path(ctx, [(3.8, 9.8), (7.4, 13.4), (14.2, 4.6)])
@@ -997,9 +1008,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         import shutil as _shutil
 
-        share_btn = Gtk.MenuButton(label="Share")
-        share_btn.set_tooltip_text("Send this PDF somewhere")
+        share_btn = Gtk.MenuButton()
+        share_btn.set_child(icon_widget(paint_share))
+        share_btn.set_tooltip_text("Share — send this PDF somewhere")
         share_btn.add_css_class("tool-slim")
+        share_btn.add_css_class("tool-icon")
         share_btn.set_valign(Gtk.Align.CENTER)
         share_pop = Gtk.Popover()
         share_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
