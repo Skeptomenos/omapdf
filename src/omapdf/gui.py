@@ -64,6 +64,8 @@ headerbar menubutton.tool-slim > button:hover { background: alpha(currentColor, 
 headerbar button.tool-slim:active,
 headerbar menubutton.tool-slim > button:active { background: alpha(currentColor, 0.16); }
 headerbar button.tool-slim:checked { background: alpha(#3584e4, 0.32); }
+headerbar button.tool-icon { padding: 5px; min-width: 28px; min-height: 28px; }
+headerbar .page-indicator { opacity: 0.85; font-weight: 500; }
 headerbar separator {
   background: alpha(currentColor, 0.22);
   margin-top: 12px;
@@ -756,6 +758,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             nonlocal first_btn
             btn = Gtk.ToggleButton()
             btn.add_css_class("tool-slim")
+            btn.add_css_class("tool-icon")
+            btn.set_valign(Gtk.Align.CENTER)
             btn.set_child(icon_widget(painter))
             btn.set_tooltip_text(tip)
             if first_btn is None:
@@ -773,6 +777,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         side_toggle = Gtk.ToggleButton()
         side_toggle.add_css_class("tool-slim")
+        side_toggle.add_css_class("tool-icon")
+        side_toggle.set_valign(Gtk.Align.CENTER)
         side_toggle.set_child(icon_widget(paint_sidebar))
         side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
         header.pack_start(side_toggle)
@@ -843,8 +849,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         next_b = Gtk.Button(label="›")
         prev_b.add_css_class("flat")
         next_b.add_css_class("flat")
-        prev_b.add_css_class("tool-slim")
-        next_b.add_css_class("tool-slim")
+        for nav_b in (prev_b, next_b):
+            nav_b.add_css_class("tool-slim")
+            nav_b.add_css_class("tool-icon")
+            nav_b.set_valign(Gtk.Align.CENTER)
         prev_b.set_tooltip_text("Previous page (PgUp)")
         next_b.set_tooltip_text("Next page (PgDn)")
 
@@ -867,6 +875,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         # The page indicator is a button: click it (or Ctrl+G) to jump to a page.
         page_btn = Gtk.MenuButton()
         page_btn.add_css_class("flat")
+        page_btn.add_css_class("tool-slim")
+        page_btn.set_valign(Gtk.Align.CENTER)
+        page_label.add_css_class("page-indicator")
         page_btn.set_child(page_label)
         page_btn.set_tooltip_text("Go to page (Ctrl+G)")
         goto_pop = Gtk.Popover()
@@ -903,12 +914,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("suggested-action")
+        save_btn.set_valign(Gtk.Align.CENTER)
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
-        undo_b.add_css_class("tool-slim")
-        redo_b.add_css_class("tool-slim")
+        for icon_b in (undo_b, redo_b):
+            icon_b.add_css_class("tool-slim")
+            icon_b.add_css_class("tool-icon")
+            icon_b.set_valign(Gtk.Align.CENTER)
 
         def do_undo():
             was_save = ed.undo()
@@ -933,6 +947,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         zoom_dot = Gtk.Label()
         zoom_btn = Gtk.MenuButton()
         zoom_btn.add_css_class("tool-slim")
+        zoom_btn.set_valign(Gtk.Align.CENTER)
         zoom_btn.set_child(zoom_dot)
         zoom_btn.set_tooltip_text("Zoom (Ctrl+scroll, Ctrl+0 fits width)")
         zoom_pop = Gtk.Popover()
@@ -957,6 +972,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_btn.set_child(Gtk.Image.new_from_icon_name("system-search-symbolic"))
         search_btn.set_tooltip_text("Search (Ctrl+F)")
         search_btn.add_css_class("tool-slim")
+        search_btn.add_css_class("tool-icon")
+        search_btn.set_valign(Gtk.Align.CENTER)
 
         # -- share menu ---------------------------------------------------
 
@@ -965,6 +982,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         share_btn = Gtk.MenuButton(label="Share")
         share_btn.set_tooltip_text("Send this PDF somewhere")
         share_btn.add_css_class("tool-slim")
+        share_btn.set_valign(Gtk.Align.CENTER)
         share_pop = Gtk.Popover()
         share_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         flatten_check = Gtk.CheckButton(label="Flatten copy first")
