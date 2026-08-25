@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -47,8 +48,29 @@ SELECT_COLOR = (0.15, 0.45, 0.95)
 
 CSS = b"""
 button.save-success { background: #2e9e4f; color: white; }
-headerbar button.tool-slim { padding-left: 7px; padding-right: 7px; min-width: 0; }
-headerbar menubutton.tool-slim > button { padding-left: 7px; padding-right: 7px; min-width: 0; }
+headerbar button.tool-slim,
+headerbar menubutton.tool-slim > button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  min-width: 0;
+  min-height: 28px;
+}
+headerbar button.tool-slim:hover,
+headerbar menubutton.tool-slim > button:hover { background: alpha(currentColor, 0.10); }
+headerbar button.tool-slim:active,
+headerbar menubutton.tool-slim > button:active { background: alpha(currentColor, 0.16); }
+headerbar button.tool-slim:checked { background: alpha(#3584e4, 0.32); }
+headerbar separator {
+  background: alpha(currentColor, 0.22);
+  margin-top: 12px;
+  margin-bottom: 12px;
+  margin-left: 3px;
+  margin-right: 3px;
+}
 label.toast-banner {
   background: rgba(35, 35, 40, 0.88);
   color: white;
@@ -621,42 +643,120 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if not tools[name].get_active():
                 tools[name].set_active(True)
 
-        def cursor_icon():
-            # The classic northwest mouse-pointer arrow, drawn in the
-            # button's own foreground color (no theme icon needed).
+        # -- vector icon set: one language, one stroke weight -------------
+
+        def _path(ctx, pts):
+            ctx.move_to(*pts[0])
+            for p in pts[1:]:
+                ctx.line_to(*p)
+
+        def _ink(ctx, color, width):
+            ctx.set_source_rgba(*color)
+            ctx.set_line_width(width)
+            ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+            ctx.set_line_join(cairo.LINE_JOIN_ROUND)
+
+        def icon_widget(painter):
             da = Gtk.DrawingArea()
-            da.set_content_width(16)
-            da.set_content_height(16)
+            da.set_content_width(18)
+            da.set_content_height(18)
             da.set_halign(Gtk.Align.CENTER)
             da.set_valign(Gtk.Align.CENTER)
 
             def dr(widget, ctx, _w, _h):
                 c = widget.get_color()
-                ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
-                pts = [(4, 1), (4, 13), (7.2, 10.4), (9.0, 14.4),
-                       (11.1, 13.4), (9.3, 9.6), (13.6, 9.3)]
-                ctx.move_to(*pts[0])
-                for p in pts[1:]:
-                    ctx.line_to(*p)
-                ctx.close_path()
-                ctx.fill()
+                painter(ctx, (c.red, c.green, c.blue, c.alpha))
 
             da.set_draw_func(dr)
             return da
 
-        def make_tool(name, icon, tip, markup=False, child=None):
+        def paint_pointer(ctx, fg):
+            ctx.set_source_rgba(*fg)
+            _path(ctx, [(5, 2), (5, 14), (8.2, 11.4), (10, 15.4),
+                        (12.1, 14.4), (10.3, 10.6), (14.6, 10.3)])
+            ctx.close_path()
+            ctx.fill()
+
+        def paint_sidebar(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            ctx.rectangle(2.5, 3.5, 13, 11)
+            ctx.stroke()
+            ctx.set_source_rgba(*fg)
+            ctx.rectangle(2.5, 3.5, 4.5, 11)
+            ctx.fill()
+
+        def paint_pen(ctx, _fg):
+            ink = (*ed.pen_color, 1.0)
+            _ink(ctx, ink, 2.6)
+            _path(ctx, [(5.6, 12.4), (13.0, 5.0)])
+            ctx.stroke()
+            _ink(ctx, ink, 1.4)
+            _path(ctx, [(3.6, 14.4), (5.6, 12.4)])
+            ctx.stroke()
+
+        def paint_highlighter(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            _path(ctx, [(6.2, 9.3), (10.6, 3.6), (13.6, 6.0), (9.2, 11.7)])
+            ctx.close_path()
+            ctx.stroke()
+            _path(ctx, [(6.2, 9.3), (5.0, 12.2), (9.2, 11.7)])
+            ctx.close_path()
+            ctx.set_source_rgba(*fg)
+            ctx.fill()
+            ctx.set_source_rgb(0.97, 0.85, 0.30)
+            ctx.rectangle(3.0, 14.4, 12.0, 2.4)
+            ctx.fill()
+
+        def paint_text(ctx, fg):
+            _ink(ctx, fg, 1.9)
+            _path(ctx, [(4.5, 4.2), (13.5, 4.2)])
+            ctx.stroke()
+            _path(ctx, [(9, 4.2), (9, 14.6)])
+            ctx.stroke()
+
+        def paint_note(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            r = 2.5
+            x0, y0, x1, y1 = 2.5, 3.0, 15.5, 11.5
+            ctx.new_sub_path()
+            ctx.arc(x1 - r, y0 + r, r, -math.pi / 2, 0)
+            ctx.arc(x1 - r, y1 - r, r, 0, math.pi / 2)
+            ctx.arc(x0 + r, y1 - r, r, math.pi / 2, math.pi)
+            ctx.arc(x0 + r, y0 + r, r, math.pi, 1.5 * math.pi)
+            ctx.close_path()
+            ctx.stroke()
+            ctx.set_source_rgba(*fg)
+            _path(ctx, [(6.2, 11.9), (5.4, 15.4), (9.6, 11.9)])
+            ctx.close_path()
+            ctx.fill()
+
+        def paint_sign(ctx, fg):
+            _ink(ctx, fg, 1.7)
+            ctx.move_to(3.2, 12.0)
+            ctx.curve_to(5.8, 3.6, 8.2, 4.4, 7.4, 8.8)
+            ctx.curve_to(6.8, 12.2, 9.4, 12.0, 10.8, 9.2)
+            ctx.stroke()
+            _ink(ctx, fg, 1.3)
+            _path(ctx, [(3.0, 15.2), (15.0, 15.2)])
+            ctx.stroke()
+
+        def paint_check(ctx, _fg):
+            _ink(ctx, (*CHECK_COLOR, 1.0), 2.3)
+            _path(ctx, [(3.8, 9.8), (7.4, 13.4), (14.2, 4.6)])
+            ctx.stroke()
+
+        def paint_cross(ctx, _fg):
+            _ink(ctx, (*CROSS_COLOR, 1.0), 2.3)
+            _path(ctx, [(4.8, 4.8), (13.2, 13.2)])
+            ctx.stroke()
+            _path(ctx, [(13.2, 4.8), (4.8, 13.2)])
+            ctx.stroke()
+
+        def make_tool(name, tip, painter):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
             btn.add_css_class("tool-slim")
-            if child is not None:
-                btn.set_child(child)
-            else:
-                label = Gtk.Label()
-                if markup:
-                    label.set_markup(icon)
-                else:
-                    label.set_text(icon)
-                btn.set_child(label)
+            btn.set_child(icon_widget(painter))
             btn.set_tooltip_text(tip)
             if first_btn is None:
                 first_btn = btn
@@ -669,28 +769,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def tool_sep():
             sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-            sep.set_margin_start(2)
-            sep.set_margin_end(2)
             header.pack_start(sep)
 
         side_toggle = Gtk.ToggleButton()
-        side_toggle.set_child(Gtk.Label(label="▤"))
+        side_toggle.add_css_class("tool-slim")
+        side_toggle.set_child(icon_widget(paint_sidebar))
         side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
         header.pack_start(side_toggle)
         tool_sep()
 
-        make_tool("select", None, "Select — click an item, drag to move (Esc deselects, Del removes)",
-                  child=cursor_icon())
+        make_tool("select", "Select — click an item, drag to move (Esc deselects, Del removes)",
+                  paint_pointer)
         tool_sep()
-        # Pen and its color share one button: the ✎ glyph is drawn in the
+        # Pen and its color share one button: the pen nib is drawn in the
         # current ink color; tapping the pen while it is ALREADY the active
         # tool opens the palette. One slot, no hover needed — touch-friendly.
-        pen_btn = make_tool("pen", "✎", "Pen — freehand ink (tap again for colors)")
-        pen_label = pen_btn.get_child()
+        pen_btn = make_tool("pen", "Pen — freehand ink (tap again for colors)", paint_pen)
+        pen_icon = pen_btn.get_child()
 
         def show_pen_color():
-            rgb = "#%02x%02x%02x" % tuple(int(c * 255) for c in ed.pen_color)
-            pen_label.set_markup(f'<span foreground="{rgb}" weight="bold">✎</span>')
+            pen_icon.queue_draw()
 
         color_pop = Gtk.Popover()
         color_pop.set_parent(pen_btn)
@@ -731,16 +829,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         pen_btn.connect("clicked", on_pen_clicked)
 
-        make_tool("highlight", '<span background="#f7d94c" foreground="#333333"> A </span>',
-                  "Highlighter — drag across a region", markup=True)
-        make_tool("text", "T", "Text — click to type onto the page")
-        make_tool("note", "🗨", "Sticky note — click to leave a comment")
+        make_tool("highlight", "Highlighter — drag across a region", paint_highlighter)
+        make_tool("text", "Text — click to type onto the page", paint_text)
+        make_tool("note", "Sticky note — click to leave a comment", paint_note)
         tool_sep()
-        make_tool("sign", "✍", "Sign — click to place your signature")
-        make_tool("check", '<span foreground="#2e9e4f" weight="bold">✓</span>',
-                  "Checkmark stamp — places a ✓ on the page", markup=True)
-        make_tool("cross", '<span foreground="#d64545" weight="bold">✕</span>',
-                  "Cross-out stamp — places an ✕ on the page", markup=True)
+        make_tool("sign", "Sign — click to place your signature", paint_sign)
+        make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
+        make_tool("cross", "Cross-out stamp — places an ✕ on the page", paint_cross)
         tools["select"].set_active(True)
 
         page_label = Gtk.Label()
