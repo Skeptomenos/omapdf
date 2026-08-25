@@ -47,6 +47,13 @@ SELECT_COLOR = (0.15, 0.45, 0.95)
 
 CSS = b"""
 button.save-success { background: #2e9e4f; color: white; }
+label.toast-banner {
+  background: rgba(35, 35, 40, 0.88);
+  color: white;
+  border-radius: 9px;
+  padding: 7px 16px;
+  margin-top: 8px;
+}
 """
 
 
@@ -689,11 +696,33 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             GLib.timeout_add(1400, restore)
 
+        # Toast: a banner that slides down from under the header, floats over
+        # the page (no layout jump), and dismisses itself after 5 seconds.
         toast_label = Gtk.Label()
-        toast_label.add_css_class("dim-label")
+        toast_label.add_css_class("toast-banner")
+        toast_revealer = Gtk.Revealer()
+        toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        toast_revealer.set_transition_duration(220)
+        toast_revealer.set_halign(Gtk.Align.CENTER)
+        toast_revealer.set_valign(Gtk.Align.START)
+        toast_state = {"timeout": 0}
 
         def toast(msg):
+            if toast_state["timeout"]:
+                GLib.source_remove(toast_state["timeout"])
+                toast_state["timeout"] = 0
+            if not msg:
+                toast_revealer.set_reveal_child(False)
+                return
             toast_label.set_text(msg)
+            toast_revealer.set_reveal_child(True)
+
+            def hide():
+                toast_state["timeout"] = 0
+                toast_revealer.set_reveal_child(False)
+                return False
+
+            toast_state["timeout"] = GLib.timeout_add(5000, hide)
 
         def on_save(_b):
             if not ed.pending:
@@ -899,10 +928,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         content.append(side_revealer)
         content.append(scroller)
+        toast_revealer.set_child(toast_label)
+        overlay = Gtk.Overlay()
+        overlay.set_child(content)
+        overlay.add_overlay(toast_revealer)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(search_bar)
-        box.append(content)
-        box.append(toast_label)
+        box.append(overlay)
         win.set_child(box)
 
         refresh_thumbs()
