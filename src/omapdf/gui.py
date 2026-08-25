@@ -48,6 +48,7 @@ SELECT_COLOR = (0.15, 0.45, 0.95)
 CSS = b"""
 button.save-success { background: #2e9e4f; color: white; }
 headerbar button.tool-slim { padding-left: 7px; padding-right: 7px; min-width: 0; }
+headerbar menubutton.tool-slim > button { padding-left: 7px; padding-right: 7px; min-width: 0; }
 label.toast-banner {
   background: rgba(35, 35, 40, 0.88);
   color: white;
@@ -747,6 +748,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         next_b = Gtk.Button(label="›")
         prev_b.add_css_class("flat")
         next_b.add_css_class("flat")
+        prev_b.add_css_class("tool-slim")
+        next_b.add_css_class("tool-slim")
         prev_b.set_tooltip_text("Previous page (PgUp)")
         next_b.set_tooltip_text("Next page (PgDn)")
 
@@ -809,6 +812,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
+        undo_b.add_css_class("tool-slim")
+        redo_b.add_css_class("tool-slim")
 
         def do_undo():
             was_save = ed.undo()
@@ -832,6 +837,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         redo_b.connect("clicked", lambda _b: do_redo())
         zoom_dot = Gtk.Label()
         zoom_btn = Gtk.MenuButton()
+        zoom_btn.add_css_class("tool-slim")
         zoom_btn.set_child(zoom_dot)
         zoom_btn.set_tooltip_text("Zoom (Ctrl+scroll, Ctrl+0 fits width)")
         zoom_pop = Gtk.Popover()
@@ -855,6 +861,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_btn = Gtk.ToggleButton()
         search_btn.set_child(Gtk.Image.new_from_icon_name("system-search-symbolic"))
         search_btn.set_tooltip_text("Search (Ctrl+F)")
+        search_btn.add_css_class("tool-slim")
 
         # -- share menu ---------------------------------------------------
 
@@ -862,6 +869,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         share_btn = Gtk.MenuButton(label="Share")
         share_btn.set_tooltip_text("Send this PDF somewhere")
+        share_btn.add_css_class("tool-slim")
         share_pop = Gtk.Popover()
         share_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         flatten_check = Gtk.CheckButton(label="Flatten copy first")
