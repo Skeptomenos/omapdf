@@ -761,6 +761,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             _path(ctx, [(3.0, 15.2), (15.0, 15.2)])
             ctx.stroke()
 
+        def paint_spark(ctx, fg):
+            # Four-point spark: "ask the agent".
+            ctx.set_source_rgba(*fg)
+            _path(ctx, [(9, 2.2), (10.7, 7.3), (15.8, 9), (10.7, 10.7),
+                        (9, 15.8), (7.3, 10.7), (2.2, 9), (7.3, 7.3)])
+            ctx.close_path()
+            ctx.fill()
+
         def paint_share(ctx, fg):
             # Arrow rising out of a tray — the universal "send it somewhere".
             _ink(ctx, fg, 1.6)
@@ -954,6 +962,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             icon_b.set_valign(Gtk.Align.CENTER)
 
         def do_undo():
+            mark_self_write()
             was_save = ed.undo()
             if was_save:
                 refresh_thumbs()
@@ -963,6 +972,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             refresh_title()
 
         def do_redo():
+            mark_self_write()
             was_save = ed.redo()
             if was_save:
                 refresh_thumbs()
@@ -1003,6 +1013,52 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_btn.add_css_class("tool-slim")
         search_btn.add_css_class("tool-icon")
         search_btn.set_valign(Gtk.Align.CENTER)
+
+        # -- ask the agent (Omarchy's native default agent) ---------------
+
+        ask_btn = Gtk.MenuButton()
+        ask_btn.set_child(icon_widget(paint_spark))
+        ask_btn.set_tooltip_text("Ask your agent about this document")
+        ask_btn.add_css_class("tool-slim")
+        ask_btn.add_css_class("tool-icon")
+        ask_btn.set_valign(Gtk.Align.CENTER)
+        ask_pop = Gtk.Popover()
+        ask_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        ask_box.set_margin_top(8)
+        ask_box.set_margin_bottom(8)
+        ask_box.set_margin_start(8)
+        ask_box.set_margin_end(8)
+        ask_entry = Gtk.Entry()
+        ask_entry.set_placeholder_text("Ask about this document…")
+        ask_entry.set_width_chars(38)
+        ask_hint = Gtk.Label(
+            label="Enter opens your default agent (omarchy agent) with the file"
+        )
+        ask_hint.add_css_class("dim-label")
+        ask_hint.set_halign(Gtk.Align.START)
+        ask_box.append(ask_entry)
+        ask_box.append(ask_hint)
+        ask_pop.set_child(ask_box)
+        ask_btn.set_popover(ask_pop)
+
+        def on_ask(_e):
+            import subprocess as sp
+
+            question = ask_entry.get_text().strip() or "Review this document for me."
+            ask_pop.popdown()
+            ask_entry.set_text("")
+            prompt = (
+                f"{question}\n\nThe document is the PDF at \"{ed.path}\" — "
+                "use omapdf to read or mark it up. It is open in the omapdf "
+                "editor, which auto-reloads when you save changes to it."
+            )
+            try:
+                sp.Popen(["omarchy-agent-prompt", prompt], start_new_session=True)
+                toast("Sent to your agent — a window is opening")
+            except FileNotFoundError:
+                toast("omarchy agent launcher not found on this system")
+
+        ask_entry.connect("activate", on_ask)
 
         # -- share menu ---------------------------------------------------
 
@@ -1091,6 +1147,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         header.pack_end(save_btn)
         header.pack_end(share_btn)
+        header.pack_end(ask_btn)
         header.pack_end(redo_b)
         header.pack_end(undo_b)
         header.pack_end(zoom_btn)
@@ -1132,6 +1189,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         toast_revealer.set_halign(Gtk.Align.CENTER)
         toast_revealer.set_valign(Gtk.Align.START)
         toast_state = {"timeout": 0}
+        # Suppresses the disk watcher while omapdf itself writes the file.
+        write_guard = {"until": 0}
+
+        def mark_self_write():
+            write_guard["until"] = GLib.get_monotonic_time() + 2_000_000
 
         def toast(msg):
             if toast_state["timeout"]:
@@ -1158,6 +1220,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             file_before = Path(ed.path).read_bytes()
             pending_before = copy.deepcopy(ed.pending)
             ed.doc.close()
+            mark_self_write()
             try:
                 engine.apply(ed.path, ops)
             except Exception as exc:  # surface engine errors in the UI
@@ -1406,6 +1469,40 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         box.append(search_bar)
         box.append(overlay)
         win.set_child(box)
+
+        # Watch the file: when an agent (or anything else) saves changes to
+        # it, refresh the view — the GUI half of the ask-the-agent loop.
+        monitor = Gio.File.new_for_path(ed.path).monitor_file(
+            Gio.FileMonitorFlags.NONE, None
+        )
+
+        def on_disk_change(_m, _f, _o, event):
+            if event != Gio.FileMonitorEvent.CHANGES_DONE_HINT:
+                return
+            if GLib.get_monotonic_time() < write_guard["until"]:
+                return
+
+            def reload():
+                if not Path(ed.path).is_file():
+                    return False
+                try:
+                    ed.doc.close()
+                    ed.doc = pymupdf.open(ed.path)
+                except Exception:
+                    return False
+                ed.page_no = min(ed.page_no, ed.doc.page_count - 1)
+                refresh_thumbs()
+                render_page()
+                if ed.pending:
+                    toast("Changed on disk — view refreshed; your unsaved items are kept")
+                else:
+                    toast("Updated by another program — reloaded")
+                return False
+
+            GLib.timeout_add(200, reload)
+
+        monitor.connect("changed", on_disk_change)
+        win._omapdf_monitor = monitor  # keep the watcher alive
 
         refresh_thumbs()
         if ed.doc.page_count > 1:
