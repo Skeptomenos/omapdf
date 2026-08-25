@@ -444,6 +444,51 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 "kind": "note", "page": ed.page_no, "x": px, "y": py, "text": t,
             })
 
+        def show_saved_annot(px, py):
+            """Click on an already-saved annotation: pop open its content."""
+            best = None
+            for a in ed.page().annots() or []:
+                r = a.rect
+                pad = 6
+                if r.x0 - pad <= px <= r.x1 + pad and r.y0 - pad <= py <= r.y1 + pad:
+                    area_sz = max(1.0, r.width * r.height)
+                    if best is None or area_sz < best[1]:
+                        best = (a, area_sz)
+            if best is None:
+                return False
+            annot = best[0]
+            kind = annot.type[1]
+            content = (annot.info.get("content") or "").strip()
+            pop = Gtk.Popover()
+            pop.set_parent(area)
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = int(px * ed.zoom), int(py * ed.zoom), 1, 1
+            pop.set_pointing_to(rect)
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            vbox.set_margin_top(8)
+            vbox.set_margin_bottom(8)
+            vbox.set_margin_start(10)
+            vbox.set_margin_end(10)
+            title = Gtk.Label()
+            title.set_markup(f"<b>{GLib.markup_escape_text(kind)}</b>")
+            title.set_halign(Gtk.Align.START)
+            vbox.append(title)
+            if content:
+                body = Gtk.Label(label=content)
+                body.set_wrap(True)
+                body.set_max_width_chars(44)
+                body.set_halign(Gtk.Align.START)
+                body.set_selectable(True)
+                vbox.append(body)
+            else:
+                hint = Gtk.Label(label="(no comment text)")
+                hint.add_css_class("dim-label")
+                hint.set_halign(Gtk.Align.START)
+                vbox.append(hint)
+            pop.set_child(vbox)
+            pop.popup()
+            return True
+
         # -- input --------------------------------------------------------
 
         def add_stamp(strokes_template, color, px, py):
@@ -483,6 +528,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 add_stamp(CROSS, CROSS_COLOR, px, py)
             else:
                 ed.selected = ed.hit(px, py)
+                if ed.selected is None:
+                    show_saved_annot(px, py)
             area.queue_draw()
             refresh_title()
 
@@ -688,18 +735,45 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         prev_b.set_tooltip_text("Previous page (PgUp)")
         next_b.set_tooltip_text("Next page (PgDn)")
 
-        def go(delta):
-            n = ed.page_no + delta
-            if 0 <= n < ed.doc.page_count:
+        def goto_page(n):
+            n = max(0, min(ed.doc.page_count - 1, n))
+            if n != ed.page_no:
                 ed.page_no = n
                 ed.selected = None
                 render_page()
 
+        def go(delta):
+            goto_page(ed.page_no + delta)
+
         prev_b.connect("clicked", lambda _b: go(-1))
         next_b.connect("clicked", lambda _b: go(1))
+
+        # The page indicator is a button: click it (or Ctrl+G) to jump to a page.
+        page_btn = Gtk.MenuButton()
+        page_btn.add_css_class("flat")
+        page_btn.set_child(page_label)
+        page_btn.set_tooltip_text("Go to page (Ctrl+G)")
+        goto_pop = Gtk.Popover()
+        goto_entry = Gtk.Entry()
+        goto_entry.set_placeholder_text("Page #")
+        goto_entry.set_width_chars(8)
+        goto_pop.set_child(goto_entry)
+        page_btn.set_popover(goto_pop)
+
+        def on_goto(_e):
+            try:
+                n = int(goto_entry.get_text().strip())
+            except ValueError:
+                return
+            goto_pop.popdown()
+            goto_entry.set_text("")
+            goto_page(n - 1)
+
+        goto_entry.connect("activate", on_goto)
+
         nav = Gtk.Box(spacing=4)
         nav.append(prev_b)
-        nav.append(page_label)
+        nav.append(page_btn)
         nav.append(next_b)
         header.set_title_widget(nav)
 
@@ -967,14 +1041,24 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.checkpoint()
                 ed.pending.remove(ed.selected)
                 ed.selected = None
+            elif ctrl and keyval == Gdk.KEY_g:
+                page_btn.popup()
             elif keyval == Gdk.KEY_Page_Up:
                 go(-1)
             elif keyval == Gdk.KEY_Page_Down:
                 go(1)
+            elif keyval == Gdk.KEY_Home:
+                goto_page(0)
+            elif keyval == Gdk.KEY_End:
+                goto_page(ed.doc.page_count - 1)
             elif ed.selected and keyval in (Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Up, Gdk.KEY_Down):
                 dx = {Gdk.KEY_Left: -step, Gdk.KEY_Right: step}.get(keyval, 0.0)
                 dy = {Gdk.KEY_Up: -step, Gdk.KEY_Down: step}.get(keyval, 0.0)
                 ed.move_item(ed.selected, dx, dy)
+            elif keyval == Gdk.KEY_Up:
+                go(-1)
+            elif keyval == Gdk.KEY_Down:
+                go(1)
             else:
                 return False
             area.queue_draw()
@@ -1097,12 +1181,39 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             Gtk.EventControllerScrollFlags.VERTICAL
         )
 
+        flip = {"accum": 0.0, "t": 0}
+
         def on_scroll(ctl, _dx, dy):
             if ctl.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = max(25.0, min(400.0, current - dy * 10))
                 render_page()
                 return True
+            # Scrolling past the page edge flows onto the neighboring page.
+            adj = scroller.get_vadjustment()
+            at_bottom = adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2
+            at_top = adj.get_value() <= 2
+            now = GLib.get_monotonic_time()
+            if now - flip["t"] > 400_000:
+                flip["accum"] = 0.0
+            flip["t"] = now
+            if dy > 0 and at_bottom and ed.page_no < ed.doc.page_count - 1:
+                flip["accum"] += dy
+                if flip["accum"] >= 2:
+                    flip["accum"] = 0.0
+                    go(1)
+                    GLib.idle_add(lambda: (adj.set_value(0), False)[1])
+                return True
+            if dy < 0 and at_top and ed.page_no > 0:
+                flip["accum"] -= dy
+                if flip["accum"] >= 2:
+                    flip["accum"] = 0.0
+                    go(-1)
+                    GLib.idle_add(
+                        lambda: (adj.set_value(adj.get_upper() - adj.get_page_size()), False)[1]
+                    )
+                return True
+            flip["accum"] = 0.0
             return False
 
         scroll_ctl.connect("scroll", on_scroll)
