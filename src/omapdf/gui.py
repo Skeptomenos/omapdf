@@ -24,7 +24,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 import cairo
 import pymupdf
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import engine
 from . import signature as sig_store
@@ -32,8 +32,22 @@ from . import signature as sig_store
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
 CROSS = [[(0.0, 0.0), (12.0, 12.0)], [(12.0, 0.0), (0.0, 12.0)]]
 STAMP_SIZE = 16.0  # points
-INK_COLOR = (0.75, 0.1, 0.1)
+CHECK_COLOR = (0.18, 0.62, 0.31)
+CROSS_COLOR = (0.84, 0.27, 0.27)
 PEN_WIDTH = 2.0
+PEN_COLORS = [
+    ("Black", (0.1, 0.1, 0.1)),
+    ("Red", (0.75, 0.1, 0.1)),
+    ("Blue", (0.13, 0.35, 0.85)),
+    ("Green", (0.15, 0.55, 0.3)),
+    ("Orange", (0.95, 0.55, 0.05)),
+]
+NOTE_SIZE = 20.0  # points, drawn sticky-note glyph
+SELECT_COLOR = (0.15, 0.45, 0.95)
+
+CSS = b"""
+button.save-success { background: #2e9e4f; color: white; }
+"""
 
 
 def _png_surface(path: str) -> cairo.ImageSurface:
@@ -56,6 +70,7 @@ class Editor:
         self.live_stroke: list[tuple[float, float]] | None = None
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
+        self.pen_color = PEN_COLORS[1][1]
         if ops_file:
             self._load_proposals(ops_file)
 
@@ -115,10 +130,15 @@ class Editor:
                     "kind": "highlight", "page": page,
                     "x0": r[0], "y0": r[1], "x1": r[2], "y1": r[3],
                 })
+            elif kind == "note":
+                self.pending.append({
+                    "kind": "note", "page": page,
+                    "x": op["at"][0], "y": op["at"][1], "text": op["text"],
+                })
             elif kind == "ink":
                 self.pending.append({
                     "kind": "ink", "page": page, "strokes": op["strokes"],
-                    "color": op.get("color", list(INK_COLOR)),
+                    "color": op.get("color", [0.75, 0.1, 0.1]),
                     "width": op.get("width", PEN_WIDTH),
                 })
         if self.pending:
@@ -138,6 +158,9 @@ class Editor:
                 ops.append({"op": "text_box", "page": page, "text": it["text"],
                             "rect": [it["x"], it["y"], it["x"] + w, it["y"] + it["size"] * 1.6],
                             "size": it["size"]})
+            elif it["kind"] == "note":
+                ops.append({"op": "note", "page": page,
+                            "at": [it["x"], it["y"]], "text": it["text"]})
             elif it["kind"] == "highlight":
                 ops.append({"op": "highlight", "page": page,
                             "rect": [min(it["x0"], it["x1"]), min(it["y0"], it["y1"]),
@@ -155,6 +178,8 @@ class Editor:
         if it["kind"] == "text":
             w = max(40.0, len(it["text"]) * it["size"] * 0.6)
             return it["x"], it["y"], it["x"] + w, it["y"] + it["size"] * 1.6
+        if it["kind"] == "note":
+            return it["x"], it["y"], it["x"] + NOTE_SIZE, it["y"] + NOTE_SIZE
         if it["kind"] == "highlight":
             return (min(it["x0"], it["x1"]), min(it["y0"], it["y1"]),
                     max(it["x0"], it["x1"]), max(it["y0"], it["y1"]))
@@ -170,7 +195,7 @@ class Editor:
         return None
 
     def move_item(self, it, dx, dy):
-        if it["kind"] in ("sig", "text"):
+        if it["kind"] in ("sig", "text", "note"):
             it["x"] += dx
             it["y"] += dy
         elif it["kind"] == "highlight":
@@ -184,7 +209,9 @@ class Editor:
 
 def run(pdf: str, ops_file: str | None = None) -> int:
     ed = Editor(pdf, ops_file)
-    app = Gtk.Application(application_id="org.omapdf.Editor")
+    app = Gtk.Application(
+        application_id="org.omapdf.Editor", flags=Gio.ApplicationFlags.NON_UNIQUE
+    )
 
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
@@ -206,6 +233,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             area.set_content_width(pix.width)
             area.set_content_height(pix.height)
             page_label.set_text(f"{ed.page_no + 1} / {ed.doc.page_count}")
+            update_nav()
             area.queue_draw()
             refresh_title()
 
@@ -220,7 +248,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 if it["page"] == ed.page_no:
                     draw_item(ctx, it)
             if ed.live_stroke and len(ed.live_stroke) > 1:
-                _stroke_path(ctx, [ed.live_stroke], INK_COLOR, PEN_WIDTH)
+                _stroke_path(ctx, [ed.live_stroke], ed.pen_color, PEN_WIDTH)
             if ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
                 ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
@@ -244,6 +272,31 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ctx.set_font_size(it["size"])
                 ctx.move_to(it["x"], it["y"] + it["size"])
                 ctx.show_text(it["text"])
+            elif it["kind"] == "note":
+                x, y = it["x"], it["y"]
+                s = NOTE_SIZE
+                fold = s * 0.3
+                # Yellow sticky with a folded corner and text lines.
+                ctx.move_to(x, y)
+                ctx.line_to(x + s, y)
+                ctx.line_to(x + s, y + s - fold)
+                ctx.line_to(x + s - fold, y + s)
+                ctx.line_to(x, y + s)
+                ctx.close_path()
+                ctx.set_source_rgb(1.0, 0.87, 0.35)
+                ctx.fill_preserve()
+                ctx.set_source_rgb(0.7, 0.58, 0.1)
+                ctx.set_line_width(0.8)
+                ctx.stroke()
+                ctx.move_to(x + s - fold, y + s)
+                ctx.line_to(x + s - fold, y + s - fold)
+                ctx.line_to(x + s, y + s - fold)
+                ctx.stroke()
+                ctx.set_source_rgb(0.55, 0.45, 0.08)
+                for i in (0.3, 0.5, 0.7):
+                    ctx.move_to(x + s * 0.15, y + s * i)
+                    ctx.line_to(x + s * 0.72, y + s * i)
+                    ctx.stroke()
             elif it["kind"] == "highlight":
                 x0, y0, x1, y1 = ed.item_rect(it)
                 ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
@@ -253,12 +306,24 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 _stroke_path(ctx, it["strokes"], it["color"], it["width"])
             if it is ed.selected:
                 x0, y0, x1, y1 = ed.item_rect(it)
-                ctx.set_source_rgba(0.15, 0.45, 0.95, 0.9)
-                ctx.set_line_width(1.2)
-                ctx.set_dash([4, 3])
-                ctx.rectangle(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6)
+                w, h = x1 - x0 + 8, y1 - y0 + 8
+                # Tinted fill + solid border + corner handles: unmistakable.
+                ctx.set_source_rgba(*SELECT_COLOR, 0.10)
+                ctx.rectangle(x0 - 4, y0 - 4, w, h)
+                ctx.fill()
+                ctx.set_source_rgba(*SELECT_COLOR, 0.95)
+                ctx.set_line_width(1.6)
+                ctx.rectangle(x0 - 4, y0 - 4, w, h)
                 ctx.stroke()
-                ctx.set_dash([])
+                hs = 3.2
+                for hx in (x0 - 4, x0 - 4 + w):
+                    for hy in (y0 - 4, y0 - 4 + h):
+                        ctx.set_source_rgb(1, 1, 1)
+                        ctx.rectangle(hx - hs, hy - hs, hs * 2, hs * 2)
+                        ctx.fill_preserve()
+                        ctx.set_source_rgba(*SELECT_COLOR, 0.95)
+                        ctx.set_line_width(1.1)
+                        ctx.stroke()
 
         def _stroke_path(ctx, strokes, color, width):
             ctx.set_source_rgb(*color)
@@ -277,15 +342,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # -- text entry popover -------------------------------------------
 
-        def prompt_text(px, py):
+        def prompt_entry(px, py, placeholder, on_text):
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
             rect.x, rect.y, rect.width, rect.height = int(px * ed.zoom), int(py * ed.zoom), 1, 1
             pop.set_pointing_to(rect)
             entry = Gtk.Entry()
-            entry.set_placeholder_text("Type, then Enter")
-            entry.set_width_chars(28)
+            entry.set_placeholder_text(placeholder)
+            entry.set_width_chars(30)
             pop.set_child(entry)
 
             def commit(_e):
@@ -293,8 +358,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 pop.popdown()
                 if text:
                     ed.checkpoint()
-                    item = {"kind": "text", "page": ed.page_no, "x": px, "y": py,
-                            "text": text, "size": 12.0}
+                    item = on_text(text)
                     ed.pending.append(item)
                     ed.selected = item
                     area.queue_draw()
@@ -304,15 +368,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             pop.popup()
             entry.grab_focus()
 
+        def prompt_text(px, py):
+            prompt_entry(px, py, "Type text, then Enter", lambda t: {
+                "kind": "text", "page": ed.page_no, "x": px, "y": py,
+                "text": t, "size": 12.0,
+            })
+
+        def prompt_note(px, py):
+            prompt_entry(px, py, "Sticky note comment, then Enter", lambda t: {
+                "kind": "note", "page": ed.page_no, "x": px, "y": py, "text": t,
+            })
+
         # -- input --------------------------------------------------------
 
-        def add_stamp(strokes_template, px, py):
+        def add_stamp(strokes_template, color, px, py):
             ed.checkpoint()
             scale = STAMP_SIZE / 14.0
             strokes = [[(px + sx * scale, py + sy * scale) for sx, sy in s]
                        for s in strokes_template]
             item = {"kind": "ink", "page": ed.page_no, "strokes": strokes,
-                    "color": list(INK_COLOR), "width": 2.4}
+                    "color": list(color), "width": 2.4}
             ed.pending.append(item)
             ed.selected = item
             set_tool("select")
@@ -323,6 +398,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             px, py = cx / ed.zoom, cy / ed.zoom
             if ed.tool == "text":
                 prompt_text(px, py)
+            elif ed.tool == "note":
+                prompt_note(px, py)
             elif ed.tool == "sign":
                 if ed._ensure_sig() is None:
                     toast("No signature saved — run: omapdf sig draw")
@@ -336,9 +413,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.selected = item
                 set_tool("select")
             elif ed.tool == "check":
-                add_stamp(CHECK, px, py)
+                add_stamp(CHECK, CHECK_COLOR, px, py)
             elif ed.tool == "cross":
-                add_stamp(CROSS, px, py)
+                add_stamp(CROSS, CROSS_COLOR, px, py)
             else:
                 ed.selected = ed.hit(px, py)
             area.queue_draw()
@@ -380,8 +457,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed.tool == "pen" and ed.live_stroke and len(ed.live_stroke) > 1:
                 ed.checkpoint()
                 ed.pending.append({"kind": "ink", "page": ed.page_no,
-                                   "strokes": [ed.live_stroke], "color": list(INK_COLOR),
-                                   "width": PEN_WIDTH})
+                                   "strokes": [ed.live_stroke],
+                                   "color": list(ed.pen_color), "width": PEN_WIDTH})
             ed.live_stroke = None
             if ed.tool == "highlight" and ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
@@ -401,6 +478,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # -- toolbar ------------------------------------------------------
 
+        css = Gtk.CssProvider()
+        css.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         header = Gtk.HeaderBar()
         tools = {}
         first_btn = None
@@ -410,10 +493,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if not tools[name].get_active():
                 tools[name].set_active(True)
 
-        def make_tool(name, icon, tip):
+        def make_tool(name, icon, tip, markup=False):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
-            btn.set_child(Gtk.Label(label=icon))
+            label = Gtk.Label()
+            if markup:
+                label.set_markup(icon)
+            else:
+                label.set_text(icon)
+            btn.set_child(label)
             btn.set_tooltip_text(tip)
             if first_btn is None:
                 first_btn = btn
@@ -424,18 +512,68 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             header.pack_start(btn)
             return btn
 
-        make_tool("select", "⬚", "Select / drag (Esc deselects, Del removes)")
+        def tool_sep():
+            sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+            sep.set_margin_start(4)
+            sep.set_margin_end(4)
+            header.pack_start(sep)
+
+        make_tool("select", "⬚", "Select — click an item, drag to move (Esc deselects, Del removes)")
+        tool_sep()
         make_tool("pen", "✎", "Pen — freehand ink")
+
+        # Pen color: a swatch dropdown living right next to the pen.
+        color_btn = Gtk.MenuButton()
+        color_dot = Gtk.Label()
+
+        def show_pen_color():
+            rgb = "#%02x%02x%02x" % tuple(int(c * 255) for c in ed.pen_color)
+            color_dot.set_markup(f'<span foreground="{rgb}" size="large">●</span>')
+
+        color_btn.set_child(color_dot)
+        color_btn.set_tooltip_text("Pen color")
+        color_pop = Gtk.Popover()
+        color_box = Gtk.Box(spacing=2)
+        for cname, rgb_t in PEN_COLORS:
+            cb = Gtk.Button()
+            clabel = Gtk.Label()
+            hexc = "#%02x%02x%02x" % tuple(int(c * 255) for c in rgb_t)
+            clabel.set_markup(f'<span foreground="{hexc}" size="x-large">●</span>')
+            cb.set_child(clabel)
+            cb.set_tooltip_text(cname)
+            cb.add_css_class("flat")
+
+            def pick(_b, chosen=rgb_t):
+                ed.pen_color = chosen
+                show_pen_color()
+                color_pop.popdown()
+                set_tool("pen")
+
+            cb.connect("clicked", pick)
+            color_box.append(cb)
+        color_pop.set_child(color_box)
+        color_btn.set_popover(color_pop)
+        show_pen_color()
+        header.pack_start(color_btn)
+
         make_tool("highlight", "▆", "Highlight — drag a region")
-        make_tool("text", "T", "Text — click to type")
+        make_tool("text", "T", "Text — click to type onto the page")
+        make_tool("note", "🗨", "Sticky note — click to leave a comment")
+        tool_sep()
         make_tool("sign", "✍", "Sign — click to place your signature")
-        make_tool("check", "✓", "Check stamp")
-        make_tool("cross", "✕", "Cross stamp")
+        make_tool("check", '<span foreground="#2e9e4f" weight="bold">✓</span>',
+                  "Checkmark stamp — places a ✓ on the page", markup=True)
+        make_tool("cross", '<span foreground="#d64545" weight="bold">✕</span>',
+                  "Cross-out stamp — places an ✕ on the page", markup=True)
         tools["select"].set_active(True)
 
         page_label = Gtk.Label()
         prev_b = Gtk.Button(label="‹")
         next_b = Gtk.Button(label="›")
+        prev_b.add_css_class("flat")
+        next_b.add_css_class("flat")
+        prev_b.set_tooltip_text("Previous page (PgUp)")
+        next_b.set_tooltip_text("Next page (PgDn)")
 
         def go(delta):
             n = ed.page_no + delta
@@ -452,16 +590,48 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         nav.append(next_b)
         header.set_title_widget(nav)
 
+        def update_nav():
+            # Single-page documents get no pager at all; otherwise the
+            # impossible direction is greyed out rather than hidden, so the
+            # control keeps a stable shape.
+            nav.set_visible(ed.doc.page_count > 1)
+            prev_b.set_sensitive(ed.page_no > 0)
+            next_b.set_sensitive(ed.page_no < ed.doc.page_count - 1)
+
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("suggested-action")
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
+        undo_b.set_tooltip_text("Undo (Ctrl+Z)")
+        redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
         undo_b.connect("clicked", lambda _b: (ed.undo(), area.queue_draw(), refresh_title()))
         redo_b.connect("clicked", lambda _b: (ed.redo(), area.queue_draw(), refresh_title()))
         header.pack_end(save_btn)
         header.pack_end(redo_b)
         header.pack_end(undo_b)
         win.set_titlebar(header)
+
+        def celebrate_save():
+            # A little cheer: the Save button flips green and a thumbs-up
+            # pops (small → big → settle), then everything reverts.
+            label = save_btn.get_child()
+            save_btn.add_css_class("save-success")
+            save_btn.set_sensitive(False)
+            frames = [(0, "9000"), (90, "14000"), (200, "17000"),
+                      (330, "13000"), (450, "14500")]
+            for delay, size in frames:
+                GLib.timeout_add(
+                    delay,
+                    lambda s=size: (label.set_markup(f'<span size="{s}">👍</span>'), False)[1],
+                )
+
+            def restore():
+                save_btn.remove_css_class("save-success")
+                save_btn.set_sensitive(True)
+                label.set_text("Save")
+                return False
+
+            GLib.timeout_add(1400, restore)
 
         toast_label = Gtk.Label()
         toast_label.add_css_class("dim-label")
@@ -489,6 +659,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.doc = pymupdf.open(ed.path)
             render_page()
             toast(f"Saved {len(ops)} change(s)")
+            celebrate_save()
 
         save_btn.connect("clicked", on_save)
 
