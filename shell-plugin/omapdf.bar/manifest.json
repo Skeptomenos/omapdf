@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omapdf.bar",
   "name": "omapdf",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Peter Bergin",
   "license": "AGPL-3.0-or-later",
   "description": "PDF quick-access pill: click to pick a recent PDF and open it for reading, annotating, or signing with omapdf.",
