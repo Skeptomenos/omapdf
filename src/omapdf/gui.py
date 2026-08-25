@@ -756,6 +756,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.page_no = n
                 ed.selected = None
                 render_page()
+                # A fresh page starts at its top, wherever the old one was.
+                adj = scroller.get_vadjustment()
+                GLib.idle_add(lambda: (adj.set_value(0), False)[1])
 
         def go(delta):
             goto_page(ed.page_no + delta)
