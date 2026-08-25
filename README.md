@@ -114,6 +114,26 @@ human confirmation.
 placement rectangle for approval. Agents confirm with the human before the ink
 lands. Automation-friendly, but consent-first.
 
+## The editor
+
+```bash
+omapdf edit doc.pdf                      # GTK4 editor: select/drag, pen,
+                                         # highlight, text, sign, ✓/✕ stamps
+omapdf edit doc.pdf --ops proposal.json  # load agent proposals as draggable
+                                         # ghosts — nudge, then Save
+```
+
+Everything you place is a *pending ghost* until Save — drag it, nudge with
+arrow keys, delete it, undo/redo — then Save applies it through the same op
+engine agents use. This is the agent-proposes / human-confirms loop working
+today.
+
+```bash
+omapdf snapshot doc.pdf --page 1 --grid 50   # page as PNG with a labeled
+                                             # coordinate grid — agents read
+                                             # placement coordinates off it
+```
+
 ## Omarchy integration
 
 - **Top-bar widget** ([`shell-plugin/`](shell-plugin/)): a PDF pill in the

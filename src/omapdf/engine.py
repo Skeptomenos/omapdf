@@ -110,12 +110,22 @@ def _apply_place_signature(doc, op) -> dict:
     return result
 
 
+def _apply_ink(doc, op) -> dict:
+    page = _page(doc, op["page"])
+    annot = page.add_ink_annot(op["strokes"])
+    annot.set_colors(stroke=op["color"])
+    annot.set_border(width=op["width"])
+    annot.update()
+    return {"rect": list(annot.rect)}
+
+
 _APPLIERS = {
     "highlight": _apply_highlight,
     "note": _apply_note,
     "text_box": _apply_text_box,
     "fill_field": _apply_fill_field,
     "place_signature": _apply_place_signature,
+    "ink": _apply_ink,
 }
 
 

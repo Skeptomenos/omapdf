@@ -168,6 +168,21 @@ def cmd_open(args):
     subprocess.Popen([*cmd, args.pdf], start_new_session=True)
 
 
+def cmd_edit(args):
+    from . import gui
+
+    raise SystemExit(gui.run(args.pdf, args.ops))
+
+
+def cmd_snapshot(args):
+    from . import render
+
+    result = render.snapshot(
+        args.pdf, page=args.page, output=args.output, grid=args.grid, scale=args.scale
+    )
+    _emit(result, True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="omapdf",
@@ -248,6 +263,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("open", help="open in the desktop PDF viewer")
     p.add_argument("pdf")
     p.set_defaults(func=cmd_open)
+
+    p = sub.add_parser("edit", help="open the omapdf editor (annotate, sign, drag)")
+    p.add_argument("pdf")
+    p.add_argument("--ops", help="ops JSON to load as draggable proposals")
+    p.set_defaults(func=cmd_edit)
+
+    p = sub.add_parser("snapshot", help="render a page to PNG (with optional coordinate grid)")
+    p.add_argument("pdf")
+    p.add_argument("--page", type=int, default=1)
+    p.add_argument("--grid", type=float, help="overlay labeled grid lines every N points")
+    p.add_argument("--scale", type=float, default=2.0, help="raster scale (2 = 144 dpi)")
+    p.add_argument("-o", "--output")
+    p.set_defaults(func=cmd_snapshot)
 
     return parser
 

@@ -135,3 +135,25 @@ def test_cli_end_to_end(sample_pdf, sig_home, tmp_path):
     assert run.returncode == 0, run.stderr
     report = json.loads(run.stdout)
     assert report["applied"][0]["style"] == "underline"
+
+
+def test_ink_op(sample_pdf, tmp_path):
+    out = tmp_path / "inked.pdf"
+    result = engine.apply(
+        sample_pdf,
+        [{"op": "ink", "page": 1, "strokes": [[[100, 200], [120, 220], [140, 200]]],
+          "color": [0.8, 0.1, 0.1], "width": 2.5}],
+        output=out,
+    )
+    assert result["applied"][0]["rect"]
+    annots = read.extract(out)["pages"][0]["annotations"]
+    assert annots and annots[0]["type"] == "Ink"
+
+
+def test_snapshot_with_grid(sample_pdf, tmp_path):
+    from omapdf import render
+
+    out = tmp_path / "page.png"
+    result = render.snapshot(sample_pdf, page=1, output=out, grid=50)
+    assert out.is_file() and out.stat().st_size > 1000
+    assert result["size"][0] == pytest.approx(595, abs=1)  # pymupdf default: A4

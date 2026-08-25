@@ -23,7 +23,7 @@ from __future__ import annotations
 
 MARKUP_STYLES = ("highlight", "underline", "strikeout", "squiggly")
 
-OP_TYPES = ("highlight", "note", "text_box", "fill_field", "place_signature")
+OP_TYPES = ("highlight", "note", "text_box", "fill_field", "place_signature", "ink")
 
 
 class OpError(ValueError):
@@ -82,6 +82,20 @@ def validate(op: dict) -> dict:
     elif kind == "fill_field":
         _require(op, "field")
         _require(op, "value")
+
+    elif kind == "ink":
+        _require(op, "page")
+        strokes = _require(op, "strokes")
+        if not (isinstance(strokes, list) and strokes and all(
+            isinstance(s, list) and len(s) >= 2 for s in strokes
+        )):
+            raise OpError("ink needs strokes: [[[x,y],...], ...], each with 2+ points")
+        out["strokes"] = [[_point(p) for p in s] for s in strokes]
+        color = op.get("color", [0, 0, 0])
+        if not (isinstance(color, (list, tuple)) and len(color) == 3):
+            raise OpError(f"color must be [r, g, b] in 0..1, got {color!r}")
+        out["color"] = [float(c) for c in color]
+        out["width"] = float(op.get("width", 2))
 
     elif kind == "place_signature":
         _require(op, "page")

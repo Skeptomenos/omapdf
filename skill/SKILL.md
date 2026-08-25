@@ -38,6 +38,13 @@ they are the same engine and can be mixed freely.
    --match` fails loudly if the text isn't found — re-read the page and match
    the document's actual wording (search is exact, not fuzzy).
 
+### When coordinates are ambiguous: look at the page
+
+`omapdf snapshot doc.pdf --page N --grid 50` renders the page to a PNG with a
+labeled coordinate grid in ops coordinates. Read the image, then place ops by
+the grid numbers you see. Use this whenever the text blocks alone don't pin
+down a location (image-heavy pages, empty regions, "put it next to the logo").
+
 ## Signing — requires human confirmation
 
 Placing a signature is consequential. Unless the user has already given an
@@ -51,6 +58,12 @@ explicit, specific instruction to sign (which page, roughly where):
    ```
 3. On approval, run again without `--dry-run`. Offer `omapdf open doc.pdf`
    so they can eyeball the result.
+
+Better still, hand the placement to the human as a draggable ghost: write the
+proposed ops to a JSON file and run `omapdf edit doc.pdf --ops proposal.json`
+(launch it detached: `setsid -f omapdf edit …`). The editor loads them as
+selected, moveable overlays — the user drags/nudges and hits Save. Prefer this
+over coordinate back-and-forth whenever a GUI session is available.
 
 Signature images are managed per-user:
 ```bash
