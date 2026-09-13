@@ -4,3 +4,7 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+# Personal Engel-500 bank statements — never commit (fixtures live outside git)
+statement-2025-10.pdf
+statement-2025-11.pdf
+statement-2025-12.pdf

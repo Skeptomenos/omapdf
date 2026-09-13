@@ -1,0 +1,468 @@
+#!/usr/bin/env python3
+"""control-omapdf — verification harness for the omapdf CLI (and later MCP/GTK).
+
+Drive the installed `omapdf` binary the way a user or agent would. Do not import
+the engine to apply edits. Keep personal fixtures out of the git repo.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+POINTER = Path("/tmp/omapdf-verify-current")
+DEFAULT_ENGEL = Path(
+    "/cursor/stores/bc-edf2aef7-00f6-4716-aad3-e4d4e3b9a39b"
+    "/internal/final-validations/engel-500"
+)
+REQUIRED_OPS_LATER = ("delete_pages", "redact")
+SEED_MATCH = "early termination clause"
+SEED_FIELD = "tenant_name"
+
+
+def find_repo() -> Path:
+    env = os.environ.get("OMAPDF_REPO")
+    if env:
+        return Path(env).resolve()
+    here = Path(__file__).resolve().parent
+    for p in [here, *here.parents]:
+        py = p / "pyproject.toml"
+        if py.is_file() and 'name = "omapdf"' in py.read_text():
+            return p
+    raise SystemExit("control-omapdf: cannot find the omapdf repo; set OMAPDF_REPO")
+
+
+def venv_python(repo: Path) -> Path:
+    return repo / ".venv" / "bin" / "python"
+
+
+def venv_omapdf(repo: Path) -> Path:
+    return repo / ".venv" / "bin" / "omapdf"
+
+
+def maybe_reexec_venv(repo: Path) -> None:
+    vpy = venv_python(repo)
+    if not vpy.is_file():
+        return
+    if Path(sys.executable).resolve() == vpy.resolve():
+        return
+    os.execv(str(vpy), [str(vpy), *sys.argv])
+
+
+def ensure_venv(repo: Path) -> Path:
+    """Create `.venv` with system site-packages (GTK `gi`) and install omapdf."""
+    vpy = venv_python(repo)
+    omapdf = venv_omapdf(repo)
+    if omapdf.is_file() and vpy.is_file():
+        return repo / ".venv"
+    venv_dir = repo / ".venv"
+    cmd = [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        text = (proc.stdout or "") + (proc.stderr or "")
+        if "ensurepip" not in text:
+            sys.stderr.write(text)
+            raise SystemExit(f"control-omapdf: venv failed (exit {proc.returncode})")
+        # Cloud images may lack python3-venv's ensurepip. Keep system gi.
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "venv",
+                "--system-site-packages",
+                "--without-pip",
+                str(venv_dir),
+            ]
+        )
+        get_pip = Path("/tmp/omapdf-verify-get-pip.py")
+        urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip)
+        subprocess.check_call([str(venv_python(repo)), str(get_pip)])
+    pip = repo / ".venv" / "bin" / "pip"
+    subprocess.check_call([str(pip), "install", "-e", ".[dev]"], cwd=str(repo))
+    if not omapdf.is_file():
+        raise SystemExit("control-omapdf: omapdf missing after install")
+    return venv_dir
+
+
+def load_state() -> dict:
+    env_dir = os.environ.get("OMAPDF_VERIFY_DIR")
+    if env_dir:
+        path = Path(env_dir) / "run.json"
+        if path.is_file():
+            return json.loads(path.read_text())
+        raise SystemExit(
+            f"control-omapdf: OMAPDF_VERIFY_DIR={env_dir} has no run.json — run launch"
+        )
+    if POINTER.is_file():
+        run_dir = Path(POINTER.read_text().strip())
+        path = run_dir / "run.json"
+        if path.is_file():
+            return json.loads(path.read_text())
+    raise SystemExit(
+        "control-omapdf: no isolated run. Export OMAPDF_VERIFY_DIR or run "
+        "`control-omapdf launch` first. Refusing to drive the user's files."
+    )
+
+
+def save_state(state: dict) -> None:
+    run_dir = Path(state["run_dir"])
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(json.dumps(state, indent=2) + "\n")
+    POINTER.write_text(str(run_dir) + "\n")
+
+
+def isolated_env(state: dict) -> dict:
+    env = os.environ.copy()
+    env["XDG_CONFIG_HOME"] = state["xdg_config_home"]
+    env["OMAPDF_VERIFY_DIR"] = state["run_dir"]
+    env["OMAPDF_VERIFY_EVIDENCE"] = state["evidence_dir"]
+    env["OMAPDF_REPO"] = state["repo"]
+    return env
+
+
+def run_omapdf(state: dict, argv: list[str], timeout: int | None = 60) -> subprocess.CompletedProcess:
+    binary = state["omapdf"]
+    if argv and argv[0] in ("omapdf", Path(binary).name):
+        argv = argv[1:]
+    return subprocess.run(
+        [binary, *argv],
+        capture_output=True,
+        text=True,
+        env=isolated_env(state),
+        timeout=timeout,
+    )
+
+
+def seed_lease(python: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    script = r"""
+import sys
+from pathlib import Path
+import pymupdf
+path = Path(sys.argv[1])
+doc = pymupdf.open()
+page = doc.new_page()
+page.insert_text((72, 100), "RENTAL AGREEMENT", fontsize=16)
+page.insert_text((72, 140), "The tenant agrees to the early termination clause.", fontsize=11)
+page.insert_text((72, 160), "Rent is due on the first of each month.", fontsize=11)
+page2 = doc.new_page()
+page2.insert_text((72, 100), "Tenant name:", fontsize=11)
+widget = pymupdf.Widget()
+widget.field_name = "tenant_name"
+widget.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+widget.rect = pymupdf.Rect(160, 88, 400, 106)
+page2.add_widget(widget)
+page2.insert_text((72, 300), "Signature:", fontsize=11)
+doc.save(str(path))
+doc.close()
+"""
+    subprocess.check_call([str(python), "-c", script, str(dest)])
+
+
+def seed_signature(python: Path, png: Path) -> None:
+    png.parent.mkdir(parents=True, exist_ok=True)
+    script = r"""
+import sys
+from pathlib import Path
+import pymupdf
+png = Path(sys.argv[1])
+pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 120, 40), True)
+pix.save(str(png))
+"""
+    subprocess.check_call([str(python), "-c", script, str(png)])
+
+
+def cmd_launch(args: argparse.Namespace) -> int:
+    repo = find_repo()
+    ensure_venv(repo)
+    python = venv_python(repo)
+    omapdf = venv_omapdf(repo)
+    run_id = os.environ.get("OMAPDF_VERIFY_RUN_ID") or datetime.now(timezone.utc).strftime(
+        "%Y%m%dT%H%M%S"
+    )
+    run_dir = Path(os.environ.get("OMAPDF_VERIFY_DIR") or f"/tmp/omapdf-verify-{run_id}").resolve()
+    evidence = Path(
+        args.evidence
+        or os.environ.get("OMAPDF_VERIFY_EVIDENCE")
+        or f"/tmp/omapdf-verify-evidence-{run_id}"
+    ).resolve()
+    if evidence == run_dir or run_dir in evidence.parents:
+        raise SystemExit(
+            "control-omapdf: OMAPDF_VERIFY_EVIDENCE must not be inside the run dir; "
+            "cleanup deletes the run dir and must leave proof artifacts"
+        )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    evidence.mkdir(parents=True, exist_ok=True)
+    xdg = run_dir / "config"
+    xdg.mkdir(parents=True, exist_ok=True)
+    work = run_dir / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    seed_pdf = work / "lease.pdf"
+    seed_lease(python, seed_pdf)
+    sig_png = work / "sig.png"
+    seed_signature(python, sig_png)
+    version = subprocess.check_output([str(omapdf), "--version"], text=True).strip()
+    state = {
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "evidence_dir": str(evidence),
+        "repo": str(repo),
+        "omapdf": str(omapdf),
+        "python": str(python),
+        "xdg_config_home": str(xdg),
+        "seed_pdf": str(seed_pdf),
+        "version": version,
+        "gui_pid": None,
+        "created": datetime.now(timezone.utc).isoformat(),
+    }
+    save_state(state)
+    add = run_omapdf(state, ["sig", "add", str(sig_png), "--name", "default"])
+    if add.returncode != 0:
+        sys.stderr.write(add.stderr)
+        return add.returncode
+    print("omapdf-verify: ready")
+    print(f"export OMAPDF_VERIFY_DIR={run_dir}")
+    print(f"export OMAPDF_VERIFY_EVIDENCE={evidence}")
+    print(f"export OMAPDF_REPO={repo}")
+    print(f"seed_pdf={seed_pdf}")
+    print(f"version={version}")
+    return 0
+
+
+def op_types(state: dict) -> list[str]:
+    code = "from omapdf.ops import OP_TYPES; print(','.join(OP_TYPES))"
+    out = subprocess.check_output([state["python"], "-c", code], text=True).strip()
+    return out.split(",") if out else []
+
+
+def engel_dir() -> Path:
+    return Path(os.environ.get("OMAPDF_VERIFY_ENGEL500", str(DEFAULT_ENGEL))).expanduser()
+
+
+def cmd_doctor(_args: argparse.Namespace) -> int:
+    state = load_state()
+    ok = True
+
+    def check(name: str, cond: bool, detail: str) -> None:
+        nonlocal ok
+        status = "ok" if cond else "FAIL"
+        if not cond:
+            ok = False
+        print(f"{status} {name}: {detail}")
+
+    version = run_omapdf(state, ["--version"])
+    check(
+        "version",
+        version.returncode == 0 and "omapdf" in version.stdout,
+        (version.stdout or version.stderr).strip(),
+    )
+    binary = Path(state["omapdf"])
+    check("binary", binary.is_file(), str(binary))
+    run_dir = Path(state["run_dir"])
+    check("run_dir", run_dir.is_dir() and "/tmp/" in str(run_dir), str(run_dir))
+    xdg = Path(state["xdg_config_home"])
+    check(
+        "isolation",
+        xdg.is_dir() and xdg.is_relative_to(run_dir),
+        f"XDG_CONFIG_HOME={xdg}",
+    )
+    seed = Path(state["seed_pdf"])
+    check("seed_pdf", seed.is_file(), str(seed))
+    evidence = Path(state["evidence_dir"])
+    check(
+        "evidence_dir",
+        evidence.is_dir() and not evidence.is_relative_to(run_dir),
+        str(evidence),
+    )
+    if seed.is_file():
+        extracted = run_omapdf(state, ["read", str(seed)])
+        if extracted.returncode != 0:
+            check("seed_read", False, extracted.stderr.strip())
+        else:
+            data = json.loads(extracted.stdout)
+            text = " ".join(
+                b.get("text", "")
+                for p in data.get("pages", [])
+                for b in p.get("text_blocks", [])
+            )
+            fields = [f.get("name") for p in data.get("pages", []) for f in p.get("form_fields", [])]
+            check(
+                "seed_content",
+                SEED_MATCH in text and SEED_FIELD in fields and data.get("page_count") == 2,
+                f"pages={data.get('page_count')} has_form={data.get('has_form')} match={SEED_MATCH!r}",
+            )
+    types = op_types(state)
+    missing = [op for op in REQUIRED_OPS_LATER if op not in types]
+    if missing:
+        print(f"later gaps: {', '.join(missing)} not in OP_TYPES ({', '.join(types)})")
+        print("later engel-500: not shippable until delete_pages and redact exist")
+    else:
+        print("ok later ops: delete_pages and redact are registered")
+    spec = engel_dir() / "SPEC.md"
+    print(f"info engel_spec: {spec} ({'present' if spec.is_file() else 'missing'})")
+    gui_pid = state.get("gui_pid")
+    if gui_pid:
+        alive = Path(f"/proc/{gui_pid}").exists()
+        check("gui_pid", alive, str(gui_pid))
+    if ok:
+        print("omapdf-verify: doctor ok")
+        return 0
+    print("omapdf-verify: doctor failed — do not drive this instance")
+    return 1
+
+
+def cmd_cli(args: argparse.Namespace) -> int:
+    state = load_state()
+    argv = list(args.argv)
+    if argv[:1] == ["--"]:
+        argv = argv[1:]
+    if not argv:
+        raise SystemExit("control-omapdf cli: missing omapdf arguments after --")
+    started = time.monotonic()
+    proc = run_omapdf(state, argv)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    sys.stdout.write(proc.stdout or "")
+    sys.stderr.write(proc.stderr or "")
+    if args.capture:
+        capture = Path(args.capture)
+        if not capture.is_absolute():
+            capture = Path(state["evidence_dir"]) / capture
+        capture.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "feature": os.environ.get("OMAPDF_VERIFY_FEATURE"),
+            "command": " ".join(["omapdf", *argv]),
+            "argv": argv,
+            "exit_code": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "duration_ms": elapsed_ms,
+            "xdg_config_home": state["xdg_config_home"],
+            "run_dir": state["run_dir"],
+        }
+        capture.write_text(json.dumps(payload, indent=2) + "\n")
+    return proc.returncode
+
+
+def cmd_digest(args: argparse.Namespace) -> int:
+    path = Path(args.path)
+    if not path.is_file():
+        raise SystemExit(f"control-omapdf digest: no such file {path}")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    print(f"sha256:{digest}  {path}")
+    return 0
+
+
+def cmd_gaps(_args: argparse.Namespace) -> int:
+    state = load_state()
+    types = op_types(state)
+    missing = [op for op in REQUIRED_OPS_LATER if op not in types]
+    spec = engel_dir() / "SPEC.md"
+    pdfs = [
+        engel_dir() / name
+        for name in (
+            "statement-2025-10.pdf",
+            "statement-2025-11.pdf",
+            "statement-2025-12.pdf",
+        )
+    ]
+    print(f"OP_TYPES: {', '.join(types)}")
+    print(f"missing_for_engel_500: {', '.join(missing) if missing else '(none)'}")
+    print(f"engel_dir: {engel_dir()}")
+    print(f"engel_spec: {'ok' if spec.is_file() else 'MISSING'} {spec}")
+    for pdf in pdfs:
+        print(f"engel_pdf: {'ok' if pdf.is_file() else 'MISSING'} {pdf.name} (do not git-add)")
+    print("payee_spelling: Torsten Engel (Thorsten matches nothing)")
+    print("hits: statement-2025-10.pdf p.9; statement-2025-12.pdf p.1 and p.16")
+    print("statement-2025-11.pdf: 0 Engel rows; deleting all 12 pages")
+    print("do_not: match on 500,00 alone — other 500€ rows exist (see SPEC.md)")
+    print("bands: keep and redact row bands are only in SPEC.md — do not re-extract")
+    if missing:
+        print("status: later (not shippable)")
+        return 2
+    if not spec.is_file() or not all(p.is_file() for p in pdfs):
+        print("status: unreachable (spec or fixtures missing)")
+        return 3
+    print("status: ops present; follow features/engel-500.md")
+    return 0
+
+
+def cmd_cleanup(_args: argparse.Namespace) -> int:
+    try:
+        state = load_state()
+    except SystemExit as exc:
+        print(exc)
+        return 1
+    gui_pid = state.get("gui_pid")
+    if gui_pid and Path(f"/proc/{gui_pid}").exists():
+        try:
+            os.kill(int(gui_pid), 15)
+        except OSError as exc:
+            print(f"control-omapdf: could not stop gui pid {gui_pid}: {exc}", file=sys.stderr)
+    run_dir = Path(state["run_dir"])
+    evidence = Path(state["evidence_dir"])
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    if POINTER.is_file() and POINTER.read_text().strip() == str(run_dir):
+        POINTER.unlink()
+    print(f"omapdf-verify: cleaned run_dir={run_dir}")
+    print(f"omapdf-verify: evidence kept at {evidence}")
+    return 0
+
+
+def cmd_state(_args: argparse.Namespace) -> int:
+    state = load_state()
+    json.dump(state, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="control-omapdf")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("launch", help="install deps, isolate dirs, seed lease.pdf")
+    p.add_argument("--evidence", help="durable evidence directory (survives cleanup)")
+    p.set_defaults(func=cmd_launch)
+
+    p = sub.add_parser("doctor", help="read-only: is this isolated instance worth driving?")
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("cli", help="run omapdf with isolated XDG_CONFIG_HOME")
+    p.add_argument("--capture", help="write command/stdout/stderr/exit JSON here")
+    p.add_argument("argv", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_cli)
+
+    p = sub.add_parser("digest", help="sha256 a file (dry-run / mutation proof)")
+    p.add_argument("path")
+    p.set_defaults(func=cmd_digest)
+
+    p = sub.add_parser("gaps", help="report missing ops and Engel-500 fixture status")
+    p.set_defaults(func=cmd_gaps)
+
+    p = sub.add_parser("cleanup", help="remove the run dir; never delete evidence")
+    p.set_defaults(func=cmd_cleanup)
+
+    p = sub.add_parser("state", help="print run.json")
+    p.set_defaults(func=cmd_state)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    repo = find_repo()
+    if args.command != "launch":
+        maybe_reexec_venv(repo)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
