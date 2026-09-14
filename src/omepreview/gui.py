@@ -44,10 +44,13 @@ from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
 from .view_gestures import (
+    compute_pinch_focus,
     current_zoom_pct,
+    mapped_point,
     page_y_at_focus,
     pinch_live_pct,
     pinch_pixmap_scale,
+    popover_is_alive,
     scroll_to_keep_focus,
     signature_ghost,
 )
@@ -907,7 +910,25 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 )
             )
 
+        sig_drag = {"active": False, "dragging": False, "just_dropped": False}
+        pinch_state = {
+            "start_pct": None,
+            "live_pct": None,
+            "commit_id": 0,
+            "anchor": None,
+            "pending_commit": False,
+            "deferred_render": False,
+            "deferred_anchor": None,
+        }
+
         def render_page(*, v_anchor: dict | None = None):
+            # Resizing the drawing area during a live signature-popover drag
+            # can unrealize the popover; GTK then SIGSEGVs on set_autohide.
+            if sig_drag.get("active"):
+                pinch_state["deferred_render"] = True
+                if v_anchor is not None:
+                    pinch_state["deferred_anchor"] = v_anchor
+                return
             ed.pinch_live_scale = 1.0
             ed.pinch_focus_area = None
             if ed.zoom_pct is None:
@@ -1414,8 +1435,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         click.connect("pressed", on_click)
         area.add_controller(click)
 
-        sig_drag = {"active": False, "dragging": False, "just_dropped": False}
-
         def _pointer_in_widget(widget):
             """Pointer position in *widget* coordinates, or None."""
             native = widget.get_native()
@@ -1441,13 +1460,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     return float(pt.x), float(pt.y)
             except (TypeError, ValueError):
                 pass
-            mapped = src.translate_coordinates(widget, sx, sy)
-            if not mapped:
+            try:
+                mapped = src.translate_coordinates(widget, sx, sy)
+            except Exception:
                 return None
-            ok, ax, ay = mapped
-            if ok:
-                return float(ax), float(ay)
-            return None
+            return mapped_point(mapped)
 
         # Hovering a note/text (pending or saved) previews its content.
         area.set_has_tooltip(True)
@@ -1881,6 +1898,46 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         sign_box.set_margin_end(10)
         sign_pop.set_child(sign_box)
 
+        def _sign_pop_alive() -> bool:
+            return popover_is_alive(sign_pop)
+
+        def _sign_pop_set_autohide(value: bool) -> None:
+            if not _sign_pop_alive():
+                return
+            try:
+                sign_pop.set_autohide(value)
+            except Exception:
+                return
+
+        def _sign_pop_popdown() -> None:
+            if not _sign_pop_alive():
+                return
+            try:
+                sign_pop.popdown()
+            except Exception:
+                return
+
+        def _sign_pop_popup() -> None:
+            if not _sign_pop_alive():
+                return
+            try:
+                sign_pop.popup()
+            except Exception:
+                return
+
+        def _flush_deferred_render() -> None:
+            if pinch_state["pending_commit"]:
+                pinch_state["pending_commit"] = False
+                if pinch_state["commit_id"]:
+                    GLib.source_remove(pinch_state["commit_id"])
+                pinch_state["commit_id"] = GLib.idle_add(commit_pinch_zoom)
+                return
+            if pinch_state["deferred_render"]:
+                pinch_state["deferred_render"] = False
+                anchor = pinch_state["deferred_anchor"]
+                pinch_state["deferred_anchor"] = None
+                GLib.idle_add(lambda: (render_page(v_anchor=anchor), False)[1])
+
         def _clear_box(box):
             child = box.get_first_child()
             while child is not None:
@@ -1963,7 +2020,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     def on_sig_drag_begin(_g, _x, _y, n=name):
                         sig_drag["active"] = True
                         sig_drag["dragging"] = False
-                        sign_pop.set_autohide(False)
+                        _sign_pop_set_autohide(False)
                         ed.sig_name = n
                         set_tool("sign")
 
@@ -1975,7 +2032,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                         dragging = sig_drag["dragging"] and math.hypot(dx, dy) > 8
                         sig_drag["active"] = False
                         sig_drag["dragging"] = False
-                        sign_pop.set_autohide(True)
+                        _sign_pop_set_autohide(True)
 
                         def finish():
                             if dragging:
@@ -1994,7 +2051,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                                             return False
 
                                         GLib.timeout_add(80, clear_drop_flag)
-                            sign_pop.popdown()
+                            _sign_pop_popdown()
+                            _flush_deferred_render()
                             return False
 
                         GLib.idle_add(finish)
@@ -2019,7 +2077,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             rec.add_css_class("suggested-action")
 
             def on_record(_b):
-                sign_pop.popdown()
+                _sign_pop_popdown()
                 record_signature(next_sig_name())
 
             rec.connect("clicked", on_record)
@@ -2028,7 +2086,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 rer = Gtk.Button(label=f"Re-record '{ed.sig_name}'")
 
                 def on_rerecord(_b, n=ed.sig_name):
-                    sign_pop.popdown()
+                    _sign_pop_popdown()
                     record_signature(n)
 
                 rer.connect("clicked", on_rerecord)
@@ -2053,9 +2111,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             rebuild_sign_popover()
             if sign_state["just_activated"]:
                 sign_state["just_activated"] = False
-                sign_pop.popup()
+                _sign_pop_popup()
             elif ed.tool == "sign":
-                sign_pop.popup()
+                _sign_pop_popup()
 
         sign_btn.connect("clicked", on_sign_clicked)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
@@ -2903,35 +2961,35 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         pinch = Gtk.GestureZoom.new()
         pinch.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        pinch_state = {"start_pct": None, "live_pct": None, "commit_id": 0, "anchor": None}
 
         def pinch_committed_pct() -> float:
             return current_zoom_pct(ed.zoom_pct, ed.zoom)
 
         def _pinch_focus(gesture):
             """Scroller-relative Y and drawing-area XY of the pinch (else viewport center)."""
-            vadj = scroller.get_vadjustment()
-            hadj = scroller.get_hadjustment()
-            vw = float(hadj.get_page_size() or scroller.get_width() or 1.0)
-            vh = float(vadj.get_page_size() or scroller.get_height() or 1.0)
-            ok, cx, cy = gesture.get_bounding_box_center()
-            if not ok:
-                cx, cy = vw / 2.0, vh / 2.0
-            mapped = scroller.translate_coordinates(area, cx, cy)
-            if mapped:
-                tok, ax, ay = mapped
-                if tok:
-                    return cy, (ax, ay)
-            return cy, (hadj.get_value() + cx, vadj.get_value() + cy)
+            return compute_pinch_focus(gesture, scroller, area)
 
         def on_pinch_begin(gesture, _seq):
+            if sig_drag["active"]:
+                return
             if pinch_state["commit_id"]:
                 GLib.source_remove(pinch_state["commit_id"])
                 pinch_state["commit_id"] = 0
+            try:
+                viewport_y, focus_area = _pinch_focus(gesture)
+            except Exception:
+                vadj = scroller.get_vadjustment()
+                hadj = scroller.get_hadjustment()
+                vw = float(hadj.get_page_size() or scroller.get_width() or 1.0)
+                vh = float(vadj.get_page_size() or scroller.get_height() or 1.0)
+                cx, cy = vw / 2.0, vh / 2.0
+                viewport_y, focus_area = cy, (
+                    float(hadj.get_value()) + cx,
+                    float(vadj.get_value()) + cy,
+                )
             start = pinch_committed_pct()
             pinch_state["start_pct"] = start
             pinch_state["live_pct"] = start
-            viewport_y, focus_area = _pinch_focus(gesture)
             ed.pinch_live_scale = 1.0
             ed.pinch_focus_area = focus_area
             pinch_state["anchor"] = {
@@ -2956,11 +3014,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def commit_pinch_zoom():
             pinch_state["commit_id"] = 0
+            if sig_drag["active"]:
+                pinch_state["pending_commit"] = True
+                return False
             live = pinch_state["live_pct"]
             anchor = pinch_state["anchor"]
             pinch_state["start_pct"] = None
             pinch_state["live_pct"] = None
             pinch_state["anchor"] = None
+            pinch_state["pending_commit"] = False
             if live is None:
                 ed.pinch_live_scale = 1.0
                 ed.pinch_focus_area = None

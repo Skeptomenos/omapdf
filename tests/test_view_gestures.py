@@ -5,11 +5,16 @@ from pathlib import Path
 from omepreview.view_gestures import (
     SIG_DND_PREFIX,
     clamp_zoom_pct,
+    compute_pinch_focus,
     current_zoom_pct,
+    gi_pointer_ok,
+    map_translate_coordinates,
+    mapped_point,
     parse_signature_dnd,
     pinch_live_pct,
     pinch_pixmap_scale,
     page_y_at_focus,
+    popover_is_alive,
     scroll_to_keep_focus,
     signature_dnd_payload,
     signature_ghost,
@@ -169,3 +174,167 @@ def test_undo_arrowhead_is_up_left_redo_is_up_right():
     undo_bottom = max(y for _, y in undo)
     # Arrowhead lives in the upper half, not a down-pointing chevron.
     assert undo_top < undo_bottom * 0.45
+
+
+def test_map_translate_coordinates_shapes():
+    assert map_translate_coordinates(None) == (False, 0.0, 0.0)
+    assert map_translate_coordinates(()) == (False, 0.0, 0.0)
+    assert map_translate_coordinates((True, 3.0, 4.5)) == (True, 3.0, 4.5)
+    assert map_translate_coordinates((False, 3.0, 4.5)) == (False, 3.0, 4.5)
+    assert map_translate_coordinates((12.0, 34.0)) == (True, 12.0, 34.0)
+    assert mapped_point((12.0, 34.0)) == (12.0, 34.0)
+    assert mapped_point(None) is None
+    assert mapped_point((False, 1.0, 2.0)) is None
+
+
+class _FakeAdj:
+    def __init__(self, value, page):
+        self._value = value
+        self._page = page
+
+    def get_value(self):
+        return self._value
+
+    def get_page_size(self):
+        return self._page
+
+
+class _FakeGesture:
+    def __init__(self, ok=True, cx=40.0, cy=80.0):
+        self.ok, self.cx, self.cy = ok, cx, cy
+
+    def get_bounding_box_center(self):
+        return self.ok, self.cx, self.cy
+
+
+class _FakeScroller:
+    def __init__(self, mapped):
+        self._mapped = mapped
+
+    def translate_coordinates(self, _area, _cx, _cy):
+        return self._mapped
+
+    def get_width(self):
+        return 400
+
+    def get_height(self):
+        return 300
+
+    def get_hadjustment(self):
+        return _FakeAdj(10.0, 400.0)
+
+    def get_vadjustment(self):
+        return _FakeAdj(20.0, 300.0)
+
+
+def test_compute_pinch_focus_accepts_omarchy_2tuple():
+    cy, xy = compute_pinch_focus(_FakeGesture(), _FakeScroller((12.0, 34.0)), object())
+    assert cy == 80.0
+    assert xy == (12.0, 34.0)
+
+
+def test_compute_pinch_focus_accepts_gtk_3tuple():
+    cy, xy = compute_pinch_focus(
+        _FakeGesture(), _FakeScroller((True, 12.0, 34.0)), object()
+    )
+    assert cy == 80.0
+    assert xy == (12.0, 34.0)
+
+
+def test_compute_pinch_focus_none_falls_back_to_viewport_center():
+    cy, xy = compute_pinch_focus(_FakeGesture(), _FakeScroller(None), object())
+    assert cy == 80.0
+    assert xy == (50.0, 100.0)
+
+
+def test_compute_pinch_focus_tok_false_falls_back():
+    cy, xy = compute_pinch_focus(
+        _FakeGesture(), _FakeScroller((False, 1.0, 2.0)), object()
+    )
+    assert xy == (50.0, 100.0)
+
+
+class _NullPopover:
+    __gpointer__ = "NULL"
+
+    def get_parent(self):
+        raise AssertionError("must not call GTK on a NULL GI pointer")
+
+    def get_realized(self):
+        raise AssertionError("must not call GTK on a NULL GI pointer")
+
+
+class _AlivePopover:
+    __gpointer__ = "0xabc"
+
+    def get_parent(self):
+        return object()
+
+    def get_realized(self):
+        return True
+
+
+class _UnrealizedPopover:
+    __gpointer__ = "0xabc"
+
+    def get_parent(self):
+        return object()
+
+    def get_realized(self):
+        return False
+
+
+class _OrphanPopover:
+    __gpointer__ = "0xabc"
+
+    def get_parent(self):
+        return None
+
+    def get_realized(self):
+        return True
+
+
+def test_popover_is_alive_skips_null_pointer_without_gtk_calls():
+    assert gi_pointer_ok(_NullPopover()) is False
+    assert popover_is_alive(_NullPopover()) is False
+    assert popover_is_alive(None) is False
+    assert popover_is_alive(_AlivePopover()) is True
+    assert popover_is_alive(_UnrealizedPopover()) is False
+    assert popover_is_alive(_OrphanPopover()) is False
+
+
+def test_pinch_begin_sets_state_after_focus():
+    src = Path(__file__).resolve().parents[1] / "src" / "omepreview" / "gui.py"
+    text = src.read_text(encoding="utf-8")
+    focus = text[text.index("def _pinch_focus") : text.index("def on_pinch_begin")]
+    begin = text[text.index("def on_pinch_begin") : text.index("def on_pinch(_gesture, scale):")]
+    assert "compute_pinch_focus" in focus
+    assert "tok, ax, ay = mapped" not in text
+    assert begin.index("_pinch_focus") < begin.index('pinch_state["start_pct"]')
+    assert 'if sig_drag["active"]:' in begin
+
+
+def test_sign_pop_autohide_and_popdown_are_guarded():
+    src = Path(__file__).resolve().parents[1] / "src" / "omepreview" / "gui.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("def rebuild_sign_popover():")
+    end = text.index("def on_sign_clicked")
+    body = text[start:end]
+    assert "sign_pop.set_autohide(False)" not in body
+    assert "sign_pop.set_autohide(True)" not in body
+    assert "sign_pop.popdown()" not in body
+    assert "_sign_pop_set_autohide(False)" in body
+    assert "_sign_pop_set_autohide(True)" in body
+    assert "_sign_pop_popdown()" in body
+    assert "popover_is_alive" in text
+    assert "if not _sign_pop_alive():" in text
+
+
+def test_render_page_skips_overlay_resize_during_sig_drag():
+    src = Path(__file__).resolve().parents[1] / "src" / "omepreview" / "gui.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.index("def render_page(")
+    end = text.index("# -- drawing")
+    body = text[start:end]
+    assert 'if sig_drag.get("active")' in body
+    assert 'pinch_state["deferred_render"]' in body

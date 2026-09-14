@@ -69,6 +69,106 @@ def scroll_to_keep_focus(
     return max(0.0, min(vmax, target))
 
 
+def map_translate_coordinates(mapped) -> tuple[bool, float, float]:
+    """Normalize ``Widget.translate_coordinates()`` across GTK / PyGObject.
+
+    GTK 4 GIR usually returns ``(ok, x, y)``. Omarchy GTK 4.22 / pygobject
+    3.56 returned a 2-tuple ``(x, y)``; unpacking that as three values raised
+    ``ValueError`` in the pinch handler. ``None`` / empty means failure.
+    """
+    if mapped is None:
+        return False, 0.0, 0.0
+    if not isinstance(mapped, (tuple, list)):
+        return False, 0.0, 0.0
+    n = len(mapped)
+    if n == 3:
+        tok, ax, ay = mapped
+        return bool(tok), float(ax), float(ay)
+    if n == 2:
+        ax, ay = mapped
+        return True, float(ax), float(ay)
+    return False, 0.0, 0.0
+
+
+def mapped_point(mapped) -> tuple[float, float] | None:
+    """Return dest ``(x, y)`` when ``translate_coordinates`` succeeded."""
+    ok, ax, ay = map_translate_coordinates(mapped)
+    if not ok:
+        return None
+    return ax, ay
+
+
+def compute_pinch_focus(gesture, scroller, area) -> tuple[float, tuple[float, float]]:
+    """Scroller-relative Y and drawing-area XY of a pinch (else viewport center).
+
+    Duck-typed: ``gesture.get_bounding_box_center()``, scroller adjustments /
+    ``translate_coordinates``, ``get_width`` / ``get_height``. Never raises on
+    a 2-tuple map result. Callers must not set ``pinch_state`` until this
+    returns.
+    """
+    vadj = scroller.get_vadjustment()
+    hadj = scroller.get_hadjustment()
+    vw = float(hadj.get_page_size() or scroller.get_width() or 1.0)
+    vh = float(vadj.get_page_size() or scroller.get_height() or 1.0)
+    try:
+        ok, cx, cy = gesture.get_bounding_box_center()
+    except Exception:
+        ok, cx, cy = False, 0.0, 0.0
+    if not ok:
+        cx, cy = vw / 2.0, vh / 2.0
+    mapped = None
+    try:
+        mapped = scroller.translate_coordinates(area, cx, cy)
+    except Exception:
+        mapped = None
+    tok, ax, ay = map_translate_coordinates(mapped)
+    if tok:
+        return float(cy), (ax, ay)
+    return float(cy), (
+        float(hadj.get_value()) + float(cx),
+        float(vadj.get_value()) + float(cy),
+    )
+
+
+def gi_pointer_ok(widget) -> bool:
+    """True if a PyGObject wrapper still holds a non-NULL C pointer.
+
+    A destroyed Gtk widget keeps a Python wrapper whose ``__gpointer__``
+    capsule prints as ``NULL``. Calling GTK methods on it SIGSEGVs.
+    Objects without ``__gpointer__`` are treated as duck-typed test doubles.
+    """
+    if widget is None:
+        return False
+    if not hasattr(widget, "__gpointer__"):
+        return True
+    ptr = widget.__gpointer__
+    if ptr is None:
+        return False
+    if "NULL" in str(ptr).upper():
+        return False
+    return True
+
+
+def popover_is_alive(widget) -> bool:
+    """True when a popover is safe to ``set_autohide`` / ``popdown``.
+
+    Requires a non-NULL GI pointer, a parent, and ``get_realized()`` when
+    that method exists. Any GTK call is skipped when the pointer is NULL —
+    ``get_realized()`` itself can SEGV on a NULL instance.
+    """
+    if not gi_pointer_ok(widget):
+        return False
+    try:
+        if widget.get_parent() is None:
+            return False
+        realized = getattr(widget, "get_realized", None)
+        if not callable(realized):
+            return True
+        return bool(realized())
+    except Exception:
+        return False
+
+
 def signature_dnd_payload(name: str) -> str:
     return f"{SIG_DND_PREFIX}{name}"
 
