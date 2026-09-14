@@ -61,10 +61,18 @@ and **GTK editor** (`omapdf edit`) unless marked GUI-only.
 | 23 | Highlight, note, sign, fill_field still work | ☐ |
 | 24 | Undo save restores prior file bytes | ☐ |
 
+## Shapes (M3 P2)
+
+| # | Check | Pass |
+|---|--------|------|
+| 25 | `omapdf shape` line/arrow/rect/oval → `omapdf read` shows Line/Square/Circle annot | ☐ |
+| 26 | MCP `add_shape` applies same geometry as CLI | ☐ |
+| 27 | GTK: Shapes tool drag → ghosts → Save → annots in `read` | ☐ |
+
 ## Not in this checklist
 
 - **Engel-500** (real bank-statement redaction exam) — end-of-dev after M2, not Slice 6.
-- **P2:** shapes, crop, password, `sign --auto`, outline sidebar.
+- **P2:** crop, password, `sign --auto`, outline sidebar.
 
 ## Quick commands
 
@@ -73,5 +81,6 @@ python -m pytest tests/ -q
 omapdf pages doc.pdf --list
 omapdf redact doc.pdf --page 1 --match "SECRET" -o out.pdf --dry-run --json
 omapdf delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
+omapdf shape doc.pdf --page 1 --shape rect --rect 72,100,200,180 -o out.pdf
 omapdf read out.pdf --json
 ```
