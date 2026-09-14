@@ -222,6 +222,37 @@ def extract_pages(
 
 
 @mcp.tool()
+def redact(
+    path: str,
+    page: int,
+    match: str | None = None,
+    rect: list[float] | None = None,
+    fill: list[float] | None = None,
+    output: str | None = None,
+    confirm: bool = False,
+) -> dict:
+    """Permanently remove text or image pixels in a region on `page`.
+
+    Provide exactly one of `match` (text search) or `rect` ([x0,y0,x1,y1]).
+    Defaults to dry-run — pass confirm=true after the user approves."""
+    op: dict = {"op": "redact", "page": page}
+    if match:
+        op["match"] = match
+    elif rect:
+        op["rect"] = rect
+    else:
+        raise ValueError("redact needs match or rect")
+    if fill:
+        op["fill"] = fill
+    result = engine.apply(path, [op], output=output, dry_run=not confirm)
+    if not confirm:
+        result["needs_confirmation"] = (
+            "Dry run only. Re-call with confirm=true after the user approves."
+        )
+    return result
+
+
+@mcp.tool()
 def flatten_pdf(path: str, output: str | None = None) -> dict:
     """Bake all annotations and form fields into page content (irreversible
     in the output file; the input is preserved when `output` is given)."""

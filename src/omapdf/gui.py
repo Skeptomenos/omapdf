@@ -16,6 +16,7 @@ import copy
 import io
 import json
 import math
+import shutil
 import sys
 from pathlib import Path
 
@@ -47,6 +48,15 @@ PEN_COLORS = [
 ]
 NOTE_SIZE = 20.0  # points, drawn sticky-note glyph
 SELECT_COLOR = (0.15, 0.45, 0.95)
+
+
+def _norm_rect(it: dict) -> tuple[float, float, float, float]:
+    return (
+        min(it["x0"], it["x1"]),
+        min(it["y0"], it["y1"]),
+        max(it["x0"], it["x1"]),
+        max(it["y0"], it["y1"]),
+    )
 
 CSS = b"""
 headerbar button.save-btn {
@@ -140,6 +150,9 @@ class Editor:
         self.page_preview = PagePreviewState(self.path)
         self.window: Gtk.Window | None = None
         self._view_doc: pymupdf.Document | None = None
+        self.redact_free_rect = False
+        self.redact_save_as_copy = True
+        self.redact_modal_shown = False
         if ops_file:
             self._load_proposals(ops_file)
 
@@ -284,6 +297,24 @@ class Editor:
                     "color": op.get("color", [0.75, 0.1, 0.1]),
                     "width": op.get("width", PEN_WIDTH),
                 })
+            elif kind == "redact":
+                if "rect" in op:
+                    r = op["rect"]
+                    item = {
+                        "kind": "redact", "page": page,
+                        "x0": r[0], "y0": r[1], "x1": r[2], "y1": r[3],
+                    }
+                else:
+                    rects = self.doc[page].search_for(op["match"])
+                    if not rects:
+                        continue
+                    r = rects[0]
+                    item = {
+                        "kind": "redact", "page": page,
+                        "x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1,
+                        "match": op["match"],
+                    }
+                self.pending.append(item)
         if self.pending:
             self.selected = self.pending[0]
             self.page_no = self.pending[0]["page"]
@@ -311,6 +342,14 @@ class Editor:
             elif it["kind"] == "ink":
                 ops.append({"op": "ink", "page": page, "strokes": it["strokes"],
                             "color": it["color"], "width": it["width"]})
+            elif it["kind"] == "redact":
+                if it.get("match"):
+                    ops.append({"op": "redact", "page": page,
+                                "match": it["match"], "fill": [0, 0, 0]})
+                else:
+                    x0, y0, x1, y1 = _norm_rect(it)
+                    ops.append({"op": "redact", "page": page,
+                                "rect": [x0, y0, x1, y1], "fill": [0, 0, 0]})
         return ops
 
     # ---- geometry -------------------------------------------------------
@@ -324,8 +363,9 @@ class Editor:
         if it["kind"] == "note":
             return it["x"], it["y"], it["x"] + NOTE_SIZE, it["y"] + NOTE_SIZE
         if it["kind"] == "highlight":
-            return (min(it["x0"], it["x1"]), min(it["y0"], it["y1"]),
-                    max(it["x0"], it["x1"]), max(it["y0"], it["y1"]))
+            return _norm_rect(it)
+        if it["kind"] == "redact":
+            return _norm_rect(it)
         xs = [p[0] for s in it["strokes"] for p in s]
         ys = [p[1] for s in it["strokes"] for p in s]
         return min(xs) - 4, min(ys) - 4, max(xs) + 4, max(ys) + 4
@@ -341,7 +381,7 @@ class Editor:
         if it["kind"] in ("sig", "text", "note"):
             it["x"] += dx
             it["y"] += dy
-        elif it["kind"] == "highlight":
+        elif it["kind"] in ("highlight", "redact"):
             for k in ("x0", "x1"):
                 it[k] += dx
             for k in ("y0", "y1"):
@@ -425,7 +465,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 _stroke_path(ctx, [ed.live_stroke], ed.pen_color, PEN_WIDTH)
             if ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
-                ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
+                if ed.tool == "redact":
+                    ctx.set_source_rgba(0, 0, 0, 0.35)
+                else:
+                    ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
                 ctx.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
                 ctx.fill()
             for i, (pno, rect) in enumerate(ed.search_hits):
@@ -488,6 +531,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
                 ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
                 ctx.fill()
+            elif it["kind"] == "redact":
+                x0, y0, x1, y1 = ed.item_rect(it)
+                ctx.set_source_rgba(0, 0, 0, 0.45)
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.fill()
+                ctx.set_source_rgba(0.9, 0.2, 0.2, 0.85)
+                ctx.set_line_width(1.2)
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.stroke()
             else:
                 _stroke_path(ctx, it["strokes"], it["color"], it["width"])
             if it is ed.selected:
@@ -717,6 +769,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.live_stroke = [(px, py)]
             elif ed.tool == "highlight":
                 ed.rubber = (px, py, px, py)
+            elif ed.tool == "redact":
+                ed.rubber = (px, py, px, py)
             elif ed.tool == "select":
                 ed.selected = ed.hit(px, py)
                 if ed.selected:
@@ -729,7 +783,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed.tool == "pen" and ed.live_stroke is not None:
                 sx, sy = ed.live_stroke[0]
                 ed.live_stroke.append((sx + pdx, sy + pdy))
-            elif ed.tool == "highlight" and ed.rubber:
+            elif ed.tool in ("highlight", "redact") and ed.rubber:
                 x0, y0, _, _ = ed.rubber
                 ed.rubber = (x0, y0, x0 + pdx, y0 + pdy)
             elif ed.tool == "select" and ed.selected and ed.drag_base is not None:
@@ -737,6 +791,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.move_item(ed.selected, pdx - lx, pdy - ly)
                 ed.drag_base = (pdx, pdy)
             area.queue_draw()
+
+        finish_redact_drag = {"fn": lambda: None}
 
         def on_drag_end(_g, _dx, _dy):
             if ed.tool == "pen" and ed.live_stroke and len(ed.live_stroke) > 1:
@@ -751,6 +807,35 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ed.checkpoint()
                     ed.pending.append({"kind": "highlight", "page": ed.page_no,
                                        "x0": x0, "y0": y0, "x1": x1, "y1": y1})
+            if ed.tool == "redact" and ed.rubber:
+                x0, y0, x1, y1 = ed.rubber
+                if abs(x1 - x0) > 3 and abs(y1 - y0) > 3:
+                    ed.checkpoint()
+                    band = pymupdf.Rect(
+                        min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+                    )
+                    added: list[dict] = []
+                    if ed.redact_free_rect:
+                        added.append({
+                            "kind": "redact", "page": ed.page_no,
+                            "x0": band.x0, "y0": band.y0, "x1": band.x1, "y1": band.y1,
+                        })
+                    else:
+                        for w in ed.page().get_text("words"):
+                            wr = pymupdf.Rect(w[:4])
+                            if wr.intersects(band):
+                                added.append({
+                                    "kind": "redact", "page": ed.page_no,
+                                    "x0": wr.x0, "y0": wr.y0, "x1": wr.x1, "y1": wr.y1,
+                                    "match": w[4],
+                                })
+                        if not added:
+                            added.append({
+                                "kind": "redact", "page": ed.page_no,
+                                "x0": band.x0, "y0": band.y0, "x1": band.x1, "y1": band.y1,
+                            })
+                    ed.pending.extend(added)
+                    finish_redact_drag["fn"]()
             ed.rubber = None
             ed.drag_base = None
             area.queue_draw()
@@ -905,6 +990,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             _path(ctx, [(13.2, 4.8), (4.8, 13.2)])
             ctx.stroke()
 
+        def paint_redact(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            ctx.rectangle(3.5, 4.0, 11.0, 10.5)
+            ctx.stroke()
+            ctx.set_source_rgba(0, 0, 0, 0.75)
+            ctx.rectangle(4.5, 5.0, 9.0, 8.5)
+            ctx.fill()
+
         def make_tool(name, tip, painter):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
@@ -993,6 +1086,48 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         make_tool("sign", "Sign — click to place your signature", paint_sign)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
         make_tool("cross", "Cross-out stamp — places an ✕ on the page", paint_cross)
+        redact_btn = make_tool(
+            "redact",
+            "Redact — drag over text (tap again for free-rectangle mode)",
+            paint_redact,
+        )
+        redact_pop = Gtk.Popover()
+        redact_pop.set_parent(redact_btn)
+        redact_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        redact_box.set_margin_top(8)
+        redact_box.set_margin_bottom(8)
+        redact_box.set_margin_start(8)
+        redact_box.set_margin_end(8)
+        free_rect_sw = Gtk.Switch(active=False, halign=Gtk.Align.END)
+        free_row = Gtk.Box(spacing=8)
+        free_row.append(Gtk.Label(label="Free rectangle (images, handwriting)", xalign=0))
+        free_row.append(free_rect_sw)
+        redact_box.append(free_row)
+        redact_hint = Gtk.Label(
+            label="Ghosts are not applied until Save.",
+            wrap=True,
+            xalign=0,
+        )
+        redact_hint.add_css_class("dim-label")
+        redact_box.append(redact_hint)
+        redact_pop.set_child(redact_box)
+        free_rect_sw.connect(
+            "notify::active",
+            lambda _sw, _pspec: setattr(ed, "redact_free_rect", free_rect_sw.get_active()),
+        )
+        redact_state = {"just_activated": False}
+        redact_btn.connect(
+            "toggled",
+            lambda b: b.get_active() and redact_state.__setitem__("just_activated", True),
+        )
+
+        def on_redact_clicked(_b):
+            if redact_state["just_activated"]:
+                redact_state["just_activated"] = False
+            elif ed.tool == "redact":
+                redact_pop.popup()
+
+        redact_btn.connect("clicked", on_redact_clicked)
         tools["select"].set_active(True)
 
         page_label = Gtk.Label()
@@ -1340,12 +1475,91 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             toast_state["timeout"] = GLib.timeout_add(5000, hide)
 
+        def show_redact_intro(on_done):
+            if ed.redact_modal_shown:
+                on_done()
+                return
+            ed.redact_modal_shown = True
+            dialog = Gtk.Window(transient_for=win, modal=True, title="Redaction")
+            dialog.set_default_size(440, -1)
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            vbox.set_margin_top(16)
+            vbox.set_margin_bottom(16)
+            vbox.set_margin_start(16)
+            vbox.set_margin_end(16)
+            vbox.append(Gtk.Label(
+                label=(
+                    "Redactions are translucent ghosts until Save.\n\n"
+                    "Save writes a new file by default (*_redacted.pdf). "
+                    "The original stays untouched."
+                ),
+                wrap=True,
+                xalign=0,
+            ))
+            copy_sw = Gtk.Switch(active=True, halign=Gtk.Align.END)
+            copy_row = Gtk.Box(spacing=8)
+            copy_row.append(Gtk.Label(
+                label="Save as *_redacted.pdf (recommended)", hexpand=True, xalign=0,
+            ))
+            copy_row.append(copy_sw)
+            vbox.append(copy_row)
+            confirm_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            confirm_box.append(Gtk.Label(
+                label="Type REDACT to overwrite the original:", xalign=0,
+            ))
+            confirm_entry = Gtk.Entry()
+            confirm_box.append(confirm_entry)
+            confirm_box.set_visible(False)
+            vbox.append(confirm_box)
+            btn_row = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+            cancel_btn = Gtk.Button(label="Cancel")
+            ok_btn = Gtk.Button(label="Continue")
+            ok_btn.add_css_class("suggested-action")
+            btn_row.append(cancel_btn)
+            btn_row.append(ok_btn)
+            vbox.append(btn_row)
+            dialog.set_child(vbox)
+
+            def validate(_obj=None):
+                inplace = not copy_sw.get_active()
+                confirm_box.set_visible(inplace)
+                ok_btn.set_sensitive(
+                    not inplace or confirm_entry.get_text().strip() == "REDACT"
+                )
+
+            copy_sw.connect("notify::active", validate)
+            confirm_entry.connect("changed", validate)
+            validate()
+
+            def accept():
+                ed.redact_save_as_copy = copy_sw.get_active()
+                dialog.close()
+                on_done()
+
+            def cancel():
+                if ed.undo_stack and ed.undo_stack[-1]["kind"] == "pending":
+                    ed.undo()
+                dialog.close()
+
+            ok_btn.connect("clicked", lambda _b: accept())
+            cancel_btn.connect("clicked", lambda _b: cancel())
+            dialog.present()
+
+        def after_redact_drag():
+            def done():
+                toast("Redaction not applied until Save")
+            show_redact_intro(done)
+
+        finish_redact_drag["fn"] = after_redact_drag
+
         def on_save(_b):
             markup_ops = ed.to_ops()
             page_ops = copy.deepcopy(ed.page_preview.page_ops)
             if not markup_ops and not page_ops:
                 toast("Nothing to save")
                 return
+            redact_ops = [op for op in markup_ops if op["op"] == "redact"]
+            other_markup = [op for op in markup_ops if op["op"] != "redact"]
             file_before = Path(ed.path).read_bytes()
             pending_before = copy.deepcopy(ed.pending)
             page_ops_before = copy.deepcopy(ed.page_preview.page_ops)
@@ -1353,13 +1567,25 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.invalidate_view()
             ed.page_preview._drop_scratch()
             mark_self_write()
+            work_path = ed.path
+            redacted_copy = None
+            if redact_ops and ed.redact_save_as_copy:
+                redacted_copy = str(
+                    Path(ed.path).with_name(Path(ed.path).stem + "_redacted.pdf")
+                )
+                shutil.copy2(ed.path, redacted_copy)
+                work_path = redacted_copy
             try:
                 for op in page_ops:
-                    engine.apply(ed.path, [op], output=ed.path)
-                if markup_ops:
-                    engine.apply(ed.path, markup_ops, output=ed.path)
+                    engine.apply(work_path, [op], output=work_path)
+                if other_markup:
+                    engine.apply(work_path, other_markup, output=work_path)
+                if redact_ops:
+                    engine.apply(work_path, redact_ops, output=work_path)
             except Exception as exc:  # surface engine errors in the UI
                 toast(f"Save failed: {exc}")
+                if redacted_copy and Path(redacted_copy).exists():
+                    Path(redacted_copy).unlink()
                 ed.doc = pymupdf.open(ed.path)
                 ed.invalidate_view()
                 ed.page_preview.rebuild()
@@ -1374,7 +1600,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.page_no = min(ed.page_no, ed.page_count() - 1)
             render_page()
             saved = len(page_ops) + len(markup_ops)
-            toast(f"Saved {saved} change(s) — Ctrl+Z reverts the save")
+            if redacted_copy:
+                toast(
+                    f"Saved {saved} change(s) to {Path(redacted_copy).name} "
+                    "— original unchanged"
+                )
+            else:
+                toast(f"Saved {saved} change(s) — Ctrl+Z reverts the save")
             celebrate_save()
 
         save_btn.connect("clicked", on_save)
@@ -1447,6 +1679,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 do_redo()
             elif keyval == Gdk.KEY_Escape:
                 ed.selected = None
+            elif keyval == Gdk.KEY_r and not ctrl:
+                set_tool("redact")
             elif keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and ed.selected:
                 ed.checkpoint()
                 ed.pending.remove(ed.selected)

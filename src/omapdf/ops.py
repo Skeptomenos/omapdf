@@ -35,6 +35,7 @@ OP_TYPES = (
     "move_pages",
     "insert_pages",
     "extract_pages",
+    "redact",
 )
 
 _ROTATE_DEGREES = (90, 180, 270, -90)
@@ -179,6 +180,19 @@ def validate(op: dict) -> dict:
     elif kind == "extract_pages":
         out["pages"] = _page_list(_require(op, "pages"))
         out["to"] = str(_require(op, "to"))
+
+    elif kind == "redact":
+        _require(op, "page")
+        if ("match" in op) == ("rect" in op):
+            raise OpError("redact needs exactly one of 'match' or 'rect'")
+        if "rect" in op:
+            out["rect"] = _rect(op["rect"])
+        fill = op.get("fill", [0, 0, 0])
+        if not (isinstance(fill, (list, tuple)) and len(fill) == 3):
+            raise OpError(f"fill must be [r, g, b] in 0..1, got {fill!r}")
+        out["fill"] = [float(c) for c in fill]
+        if "apply_now" in op:
+            out["apply_now"] = bool(op["apply_now"])
 
     if "page" in out:
         page = out["page"]

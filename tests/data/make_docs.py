@@ -46,3 +46,15 @@ def make_image_only_page_pdf(path: Path | str, image_path: Path | str) -> Path:
     doc.save(str(path))
     doc.close()
     return path
+
+
+def make_secret_pdf(path: Path | str) -> Path:
+    """Single-page PDF with a redactable SECRET token and a public line."""
+    path = Path(path)
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 72), "Line with SECRET token here", fontsize=12)
+    page.insert_text((72, 100), "Public line without token", fontsize=12)
+    doc.save(str(path))
+    doc.close()
+    return path
