@@ -2203,7 +2203,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def on_sign_clicked(_b):
             sign_state["just_activated"] = False
             rebuild_sign_popover()
-            _sign_pop_popup()
+            # Defer past this click: popup() during the press is dismissed by
+            # autohide on the same release (same pattern as saved-annot pops).
+            GLib.idle_add(lambda: (_sign_pop_popup(), False)[1])
 
         sign_btn.connect("clicked", on_sign_clicked)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
