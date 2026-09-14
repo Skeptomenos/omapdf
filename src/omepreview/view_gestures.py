@@ -178,6 +178,32 @@ def popover_is_alive(widget) -> bool:
         return False
 
 
+def popover_can_popup(widget) -> bool:
+    """True when ``popup()`` is safe: non-NULL pointer and a parent.
+
+    Unlike ``popover_is_alive``, this does **not** require ``get_realized()``.
+    A Sign popover is unrealized until the first ``popup()``; requiring
+    realized made the Sign tool arm click-to-place without opening the
+    gallery.
+    """
+    if not gi_pointer_ok(widget):
+        return False
+    try:
+        return widget.get_parent() is not None
+    except Exception:
+        return False
+
+
+def delete_selected_ghost(pending: list, selected: dict | None) -> dict | None:
+    """Remove *selected* from *pending* if it is that ghost. Returns new selection."""
+    if selected is None:
+        return None
+    if selected in pending:
+        pending.remove(selected)
+        return None
+    return selected
+
+
 def signature_dnd_payload(name: str) -> str:
     return f"{SIG_DND_PREFIX}{name}"
 
