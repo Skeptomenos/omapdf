@@ -41,6 +41,34 @@ def pinch_pixmap_scale(committed_pct: float, live_pct: float) -> float:
     return live_pct / committed_pct
 
 
+def page_y_at_focus(
+    *,
+    page_origin_y: float,
+    zoom: float,
+    vscroll: float,
+    viewport_y: float,
+) -> float:
+    """PDF-space Y (top-left origin) under a scroller-relative viewport Y."""
+    if zoom <= 0:
+        return 0.0
+    return (vscroll + viewport_y - page_origin_y) / zoom
+
+
+def scroll_to_keep_focus(
+    *,
+    page_origin_y: float,
+    zoom: float,
+    page_y: float,
+    viewport_y: float,
+    vmax: float,
+) -> float:
+    """vadjustment so ``page_y`` stays at the same screen height ``viewport_y``."""
+    target = page_origin_y + page_y * zoom - viewport_y
+    if vmax < 0:
+        vmax = 0.0
+    return max(0.0, min(vmax, target))
+
+
 def signature_dnd_payload(name: str) -> str:
     return f"{SIG_DND_PREFIX}{name}"
 

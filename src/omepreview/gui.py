@@ -36,7 +36,7 @@ except (ImportError, ValueError) as exc:
     ) from exc
 import cairo
 import pymupdf
-from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, PangoCairo
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 
 from . import engine
 from . import gui_pages
@@ -45,12 +45,14 @@ from . import signature as sig_store
 from .page_preview import PagePreviewState
 from .view_gestures import (
     current_zoom_pct,
-    parse_signature_dnd,
+    page_y_at_focus,
     pinch_live_pct,
     pinch_pixmap_scale,
-    signature_dnd_payload,
+    scroll_to_keep_focus,
     signature_ghost,
 )
+from .rail_icons import paint_redo as paint_redo_glyph
+from .rail_icons import paint_undo as paint_undo_glyph
 from .window_controls import window_controls_enabled
 
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
@@ -238,12 +240,14 @@ box.omapdf-overlay-toolbar .zoom-indicator {{
   letter-spacing: 0.02em;
   opacity: 0.62;
 }}
-button.omapdf-sig-card {{
+button.omapdf-sig-card,
+box.omapdf-sig-card {{
   padding: 8px 10px;
   border-radius: 0;
   min-width: 168px;
 }}
-button.omapdf-sig-card label {{
+button.omapdf-sig-card label,
+box.omapdf-sig-card label {{
   font-family: monospace;
   font-size: 10.5px;
   opacity: 0.62;
@@ -439,6 +443,7 @@ class Editor:
         self.shape_kind = "rect"
         self.zoom_pct: float | None = None  # None = fit page in viewport
         self.pinch_live_scale = 1.0  # cairo extra scale while pinching
+        self.pinch_focus_area: tuple[float, float] | None = None
         self.page_origin = (0.0, 0.0)  # paper top-left in view pixels
         self.paper_px = (0, 0)  # paper width/height in view pixels
         self.search_term = ""
@@ -872,8 +877,39 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ox, oy = ed.page_origin
             return (ox + px * ed.zoom, oy + py * ed.zoom)
 
-        def render_page():
+        def capture_v_anchor(viewport_y: float | None = None) -> dict:
+            vadj = scroller.get_vadjustment()
+            vh = float(vadj.get_page_size() or scroller.get_height() or 1.0)
+            if viewport_y is None:
+                viewport_y = vh / 2.0
+            return {
+                "page_y": page_y_at_focus(
+                    page_origin_y=ed.page_origin[1],
+                    zoom=ed.zoom,
+                    vscroll=float(vadj.get_value()),
+                    viewport_y=float(viewport_y),
+                ),
+                "viewport_y": float(viewport_y),
+            }
+
+        def restore_v_anchor(anchor: dict | None) -> None:
+            if not anchor:
+                return
+            vadj = scroller.get_vadjustment()
+            vmax = max(0.0, float(vadj.get_upper() - vadj.get_page_size()))
+            vadj.set_value(
+                scroll_to_keep_focus(
+                    page_origin_y=ed.page_origin[1],
+                    zoom=ed.zoom,
+                    page_y=anchor["page_y"],
+                    viewport_y=anchor["viewport_y"],
+                    vmax=vmax,
+                )
+            )
+
+        def render_page(*, v_anchor: dict | None = None):
             ed.pinch_live_scale = 1.0
+            ed.pinch_focus_area = None
             if ed.zoom_pct is None:
                 z = fit_page_zoom()
             else:
@@ -902,6 +938,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             page_label.set_text(f"{ed.page_no + 1} / {ed.page_count()}")
             update_nav()
             sidebar_api["highlight_current"](ed.page_no)
+            if v_anchor is not None:
+                restore_v_anchor(v_anchor)
+                GLib.idle_add(lambda: (restore_v_anchor(v_anchor), False)[1])
             area.queue_draw()
             refresh_title()
 
@@ -921,8 +960,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 _draw_folio(ctx, folio, ox, oy - 13, fg, 0.5)
                 live = ed.pinch_live_scale
                 if live != 1.0:
-                    fx = ox + pw / 2
-                    fy = oy + ph / 2
+                    if ed.pinch_focus_area is not None:
+                        fx, fy = ed.pinch_focus_area
+                    else:
+                        fx = ox + pw / 2
+                        fy = oy + ph / 2
                     ctx.translate(fx, fy)
                     ctx.scale(live, live)
                     ctx.translate(-fx, -fy)
@@ -1372,68 +1414,40 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         click.connect("pressed", on_click)
         area.add_controller(click)
 
-        sig_drag = {"active": False, "just_dropped": False}
+        sig_drag = {"active": False, "dragging": False, "just_dropped": False}
 
-        def _sig_content_provider(name: str) -> Gdk.ContentProvider:
-            payload = signature_dnd_payload(name)
+        def _pointer_in_widget(widget):
+            """Pointer position in *widget* coordinates, or None."""
+            native = widget.get_native()
+            if native is None:
+                return None
+            surface = native.get_surface()
+            if surface is None:
+                return None
+            display = widget.get_display()
+            seat = display.get_default_seat() if display is not None else None
+            device = seat.get_pointer() if seat is not None else None
+            if device is None:
+                return None
+            ok, sx, sy, _mask = surface.get_device_position(device)
+            if not ok:
+                return None
+            src = native if isinstance(native, Gtk.Widget) else win
             try:
-                value = GObject.Value(GObject.TYPE_STRING, payload)
-                providers = [Gdk.ContentProvider.new_for_value(value)]
+                from gi.repository import Graphene
+
+                ok, pt = src.compute_point(widget, Graphene.Point().init(sx, sy))
+                if ok:
+                    return float(pt.x), float(pt.y)
             except (TypeError, ValueError):
-                providers = [Gdk.ContentProvider.new_for_value(payload)]
-            try:
-                path = sig_store.get(name)
-                providers.append(
-                    Gdk.ContentProvider.new_for_value(
-                        Gio.File.new_for_path(str(path))
-                    )
-                )
-            except (FileNotFoundError, TypeError, ValueError):
                 pass
-            if len(providers) == 1:
-                return providers[0]
-            try:
-                return Gdk.ContentProvider.new_union(providers)
-            except (TypeError, ValueError):
-                return providers[0]
-
-        def drop_signature_at(value, widget, x, y) -> bool:
-            name = parse_signature_dnd(value)
-            if not name:
-                return False
-            if widget is not area:
-                ok, x, y = widget.translate_coordinates(area, x, y)
-                if not ok:
-                    return False
-            px, py = to_page_point(x, y)
-            placed = place_named_signature(name, px, py)
-            if placed:
-                sig_drag["just_dropped"] = True
-
-                def clear_drop_flag():
-                    sig_drag["just_dropped"] = False
-                    return False
-
-                GLib.idle_add(clear_drop_flag)
-                sign_pop.popdown()
-            return placed
-
-        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
-        drop.set_preload(True)
-
-        def on_sig_drop(_target, value, x, y):
-            return drop_signature_at(value, area, x, y)
-
-        drop.connect("drop", on_sig_drop)
-        area.add_controller(drop)
-
-        file_drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
-        file_drop.set_preload(True)
-        file_drop.connect(
-            "drop",
-            lambda _t, value, x, y: drop_signature_at(value, area, x, y),
-        )
-        area.add_controller(file_drop)
+            mapped = src.translate_coordinates(widget, sx, sy)
+            if not mapped:
+                return None
+            ok, ax, ay = mapped
+            if ok:
+                return float(ax), float(ay)
+            return None
 
         # Hovering a note/text (pending or saved) previews its content.
         area.set_has_tooltip(True)
@@ -1460,8 +1474,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         drag = Gtk.GestureDrag()
 
-        def on_drag_begin(_g, sx, sy):
+        def on_drag_begin(g, sx, sy):
             if sig_drag["active"] or sig_drag["just_dropped"]:
+                g.set_state(Gtk.EventSequenceState.DENIED)
                 return
             px, py = to_page_point(sx, sy)
             if ed.tool == "pen":
@@ -1890,7 +1905,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 gallery.set_valign(Gtk.Align.START)
                 tw, th = _sig_thumb_size()
                 for name in names:
-                    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
                     thumb = Gtk.DrawingArea()
                     thumb.set_content_width(tw)
                     thumb.set_content_height(th)
@@ -1924,16 +1938,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     label.set_max_width_chars(16)
                     label.set_justify(Gtk.Justification.CENTER)
                     label.set_xalign(0.5)
-                    inner.append(thumb)
-                    inner.append(label)
-                    card = Gtk.Button()
-                    card.add_css_class("flat")
+                    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
                     card.add_css_class("omapdf-sig-card")
-                    card.set_child(inner)
                     card.set_tooltip_text(f"Drag {name} onto the page")
+                    card.append(thumb)
+                    card.append(label)
 
-                    def on_pick(_b, n=name):
-                        if sig_drag["active"]:
+                    def on_pick(_g, _n, _x, _y, n=name):
+                        if sig_drag["dragging"]:
                             return
                         ed.sig_name = n
                         set_tool("sign")
@@ -1942,28 +1954,55 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                             gallery_child.queue_draw()
                             gallery_child = gallery_child.get_next_sibling()
 
-                    card.connect("clicked", on_pick)
-                    drag = Gtk.DragSource()
-                    drag.set_actions(Gdk.DragAction.COPY)
+                    pick = Gtk.GestureClick()
+                    pick.connect("released", on_pick)
+                    card.add_controller(pick)
 
-                    def on_prepare(_src, _x, _y, n=name):
-                        return _sig_content_provider(n)
+                    sig_move = Gtk.GestureDrag()
 
-                    def on_drag_begin(_src, _drag, n=name):
+                    def on_sig_drag_begin(_g, _x, _y, n=name):
                         sig_drag["active"] = True
+                        sig_drag["dragging"] = False
                         sign_pop.set_autohide(False)
                         ed.sig_name = n
                         set_tool("sign")
 
-                    def on_drag_end(_src, _drag, _delete):
-                        sig_drag["active"] = False
-                        sign_pop.set_autohide(True)
-                        sign_pop.popdown()
+                    def on_sig_drag_update(_g, dx, dy):
+                        if math.hypot(dx, dy) > 8:
+                            sig_drag["dragging"] = True
 
-                    drag.connect("prepare", on_prepare)
-                    drag.connect("drag-begin", on_drag_begin)
-                    drag.connect("drag-end", on_drag_end)
-                    card.add_controller(drag)
+                    def on_sig_drag_end(_g, dx, dy, n=name):
+                        dragging = sig_drag["dragging"] and math.hypot(dx, dy) > 8
+                        sig_drag["active"] = False
+                        sig_drag["dragging"] = False
+                        sign_pop.set_autohide(True)
+
+                        def finish():
+                            if dragging:
+                                xy = _pointer_in_widget(area)
+                                if xy is not None:
+                                    ax, ay = xy
+                                    aw = area.get_width() or 0
+                                    ah = area.get_height() or 0
+                                    if 0 <= ax <= aw and 0 <= ay <= ah:
+                                        px, py = to_page_point(ax, ay)
+                                        place_named_signature(n, px, py)
+                                        sig_drag["just_dropped"] = True
+
+                                        def clear_drop_flag():
+                                            sig_drag["just_dropped"] = False
+                                            return False
+
+                                        GLib.timeout_add(80, clear_drop_flag)
+                            sign_pop.popdown()
+                            return False
+
+                        GLib.idle_add(finish)
+
+                    sig_move.connect("drag-begin", on_sig_drag_begin)
+                    sig_move.connect("drag-update", on_sig_drag_update)
+                    sig_move.connect("drag-end", on_sig_drag_end)
+                    card.add_controller(sig_move)
                     gallery.append(card)
                 gallery_scroll = Gtk.ScrolledWindow()
                 gallery_scroll.set_policy(
@@ -2192,30 +2231,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             prev_b.set_sensitive(ed.page_no > 0)
             next_b.set_sensitive(ed.page_no < ed.page_count() - 1)
 
-        def paint_undo(ctx, fg):
-            _ink(ctx, fg, 1.6)
-            ctx.arc(10.0, 10.0, 5.0, 0.55, 3.9)
-            ctx.stroke()
-            ctx.move_to(4.6, 6.0)
-            ctx.line_to(4.2, 11.2)
-            ctx.line_to(8.6, 10.0)
-            ctx.stroke()
-
-        def paint_redo(ctx, fg):
-            _ink(ctx, fg, 1.6)
-            ctx.arc(8.0, 10.0, 5.0, -0.75, 2.6)
-            ctx.stroke()
-            ctx.move_to(13.4, 6.0)
-            ctx.line_to(13.8, 11.2)
-            ctx.line_to(9.4, 10.0)
-            ctx.stroke()
-
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("omapdf-ghost")
         undo_b = Gtk.Button()
-        undo_b.set_child(icon_widget(paint_undo))
+        undo_b.set_child(icon_widget(paint_undo_glyph))
         redo_b = Gtk.Button()
-        redo_b.set_child(icon_widget(paint_redo))
+        redo_b.set_child(icon_widget(paint_redo_glyph))
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
         for icon_b in (undo_b, redo_b):
@@ -2259,9 +2280,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         zoom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         def set_zoom(pct):
+            anchor = capture_v_anchor()
             ed.zoom_pct = pct
             zoom_pop.popdown()
-            render_page()
+            render_page(v_anchor=anchor)
 
         for zlabel, zval in [("Fit page", None), ("50%", 50.0), ("75%", 75.0),
                              ("100%", 100.0), ("125%", 125.0), ("150%", 150.0),
@@ -2660,14 +2682,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ctrl and keyval in (Gdk.KEY_plus, Gdk.KEY_equal):
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = min(400.0, current + 25)
-                render_page()
+                render_page(v_anchor=capture_v_anchor())
             elif ctrl and keyval == Gdk.KEY_minus:
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = max(25.0, current - 25)
-                render_page()
+                render_page(v_anchor=capture_v_anchor())
             elif ctrl and keyval == Gdk.KEY_0:
                 ed.zoom_pct = None
-                render_page()
+                render_page(v_anchor=capture_v_anchor())
             elif keyval == Gdk.KEY_F9:
                 side_toggle.set_active(not side_toggle.get_active())
             elif side_toggle.get_active():
@@ -2872,7 +2894,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ctl.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = max(25.0, min(400.0, current - dy * 10))
-                render_page()
+                render_page(v_anchor=capture_v_anchor())
                 return True
             return False
 
@@ -2881,19 +2903,46 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         pinch = Gtk.GestureZoom.new()
         pinch.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        pinch_state = {"start_pct": None, "live_pct": None, "commit_id": 0}
+        pinch_state = {"start_pct": None, "live_pct": None, "commit_id": 0, "anchor": None}
 
         def pinch_committed_pct() -> float:
             return current_zoom_pct(ed.zoom_pct, ed.zoom)
 
-        def on_pinch_begin(_gesture, _seq):
+        def _pinch_focus(gesture):
+            """Scroller-relative Y and drawing-area XY of the pinch (else viewport center)."""
+            vadj = scroller.get_vadjustment()
+            hadj = scroller.get_hadjustment()
+            vw = float(hadj.get_page_size() or scroller.get_width() or 1.0)
+            vh = float(vadj.get_page_size() or scroller.get_height() or 1.0)
+            ok, cx, cy = gesture.get_bounding_box_center()
+            if not ok:
+                cx, cy = vw / 2.0, vh / 2.0
+            mapped = scroller.translate_coordinates(area, cx, cy)
+            if mapped:
+                tok, ax, ay = mapped
+                if tok:
+                    return cy, (ax, ay)
+            return cy, (hadj.get_value() + cx, vadj.get_value() + cy)
+
+        def on_pinch_begin(gesture, _seq):
             if pinch_state["commit_id"]:
                 GLib.source_remove(pinch_state["commit_id"])
                 pinch_state["commit_id"] = 0
             start = pinch_committed_pct()
             pinch_state["start_pct"] = start
             pinch_state["live_pct"] = start
+            viewport_y, focus_area = _pinch_focus(gesture)
             ed.pinch_live_scale = 1.0
+            ed.pinch_focus_area = focus_area
+            pinch_state["anchor"] = {
+                "page_y": page_y_at_focus(
+                    page_origin_y=ed.page_origin[1],
+                    zoom=ed.zoom,
+                    vscroll=float(scroller.get_vadjustment().get_value()),
+                    viewport_y=float(viewport_y),
+                ),
+                "viewport_y": float(viewport_y),
+            }
 
         def on_pinch(_gesture, scale):
             start = pinch_state["start_pct"]
@@ -2908,13 +2957,16 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def commit_pinch_zoom():
             pinch_state["commit_id"] = 0
             live = pinch_state["live_pct"]
+            anchor = pinch_state["anchor"]
             pinch_state["start_pct"] = None
             pinch_state["live_pct"] = None
+            pinch_state["anchor"] = None
             if live is None:
                 ed.pinch_live_scale = 1.0
+                ed.pinch_focus_area = None
                 return False
             ed.zoom_pct = live
-            render_page()
+            render_page(v_anchor=anchor)
             return False
 
         def on_pinch_end(_gesture, _seq):
@@ -2929,14 +2981,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         pinch.connect("end", on_pinch_end)
         pinch.connect("cancel", on_pinch_end)
         scroller.add_controller(pinch)
-
-        scroller_drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
-        scroller_drop.set_preload(True)
-        scroller_drop.connect(
-            "drop",
-            lambda _t, value, x, y: drop_signature_at(value, scroller, x, y),
-        )
-        scroller.add_controller(scroller_drop)
 
         # Keep fit-page honest when the viewport changes — sidebar sliding
         # in or out, window resizes. Debounced so the revealer animation
@@ -3048,26 +3092,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         if ed.page_count() > 1:
             side_toggle.set_active(True)
 
-        def log_layout_sizes(_src=None, _pspec=None):
-            toolbar_w = toolbar.get_width() or toolbar.get_allocated_width()
-            scroll_w = scroller.get_width() or scroller.get_allocated_width()
-            area_w = area.get_width() or area.get_allocated_width()
-            area_h = area.get_height() or area.get_allocated_height()
-            surf = ed.page_surface
-            surf_sz = (
-                (surf.get_width(), surf.get_height()) if surf is not None else None
-            )
-            print(
-                f"omepreview layout: toolbar={toolbar_w} scroller={scroll_w} "
-                f"drawing_area={area_w}x{area_h} page_surface={surf_sz} zoom={ed.zoom:.3f}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return False
-
         def initial_render():
             render_page()
-            log_layout_sizes()
             if ed.pending:
                 toast(
                     f"{len(ed.pending)} proposed change(s) loaded — "

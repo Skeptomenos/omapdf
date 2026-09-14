@@ -32,14 +32,15 @@ compiled UI code. This directory holds its design notes.
 - **Rendering**: current page rasterized by PyMuPDF at the fit/zoom scale
   into a cairo surface; ghosts and search-match overlays draw above it in
   page coordinates (ctx scaled by zoom). Two-finger pinch (`Gtk.GestureZoom`)
-  live-scales that pixmap with cairo while fingers move; the PDF is
-  re-rasterized once on gesture end (or idle), never on every scale-changed
-  event. Ctrl+scroll still steps zoom and re-renders.
+  live-scales that pixmap around the pinch (else viewport) center; the PDF
+  is re-rasterized once on gesture end. Vertical scroll is restored so the
+  focal point stays at the same screen height — the scroller is never
+  reset to 0 on zoom. Ctrl+scroll keeps the same vertical rule.
 - **Sign popover**: horizontal gallery of saved SVGs (preview above the
-  name). Drag a card onto the page to drop a `place_signature` ghost;
-  click-place remains the fallback. The popover stays mapped for the drag
-  so GTK does not destroy the `DragSource`. Record new / Re-record share
-  one row.
+  name). Drag uses an in-process `Gtk.GestureDrag` on the card (not
+  `Gtk.DragSource` / `DropTarget`, which froze the GTK loop on Hyprland).
+  On release over the page, a `place_signature` ghost is placed on idle.
+  Click-place remains the fallback. Record new / Re-record share one row.
 - **Icons**: hand-drawn cairo painters (`paint_*`) in one stroke language,
   colored by the widget's foreground (theme-proof); the pen icon draws in
   the current ink color and doubles as the color indicator.
