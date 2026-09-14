@@ -42,6 +42,7 @@ from . import gui_pages
 from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
+from .window_controls import window_controls_enabled
 
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
 CROSS = [[(0.0, 0.0), (12.0, 12.0)], [(12.0, 0.0), (0.0, 12.0)]]
@@ -215,44 +216,9 @@ box.omapdf-overlay-toolbar {{
   margin: 0;
   min-width: 44px;
 }}
-box.omapdf-overlay-toolbar button.tool-slim,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button {{
+box.omapdf-overlay-toolbar separator {{
   background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  margin: 2px 8px;
-  opacity: 0.62;
-  transition: opacity 120ms ease;
-}}
-box.omapdf-overlay-toolbar button.tool-slim:hover,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button:hover {{
-  opacity: 1;
-  background: transparent;
-}}
-box.omapdf-overlay-toolbar button.tool-slim:active,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button:active {{
-  background: alpha(currentColor, 0.08);
-  border-radius: 3px;
-}}
-box.omapdf-overlay-toolbar button.tool-slim:checked {{
-  opacity: 1;
-  background-image: linear-gradient(currentColor, currentColor);
-  background-size: 12px 1.5px;
-  background-repeat: no-repeat;
-  background-position: 50% calc(100% - 3px);
-}}
-box.omapdf-overlay-toolbar button.tool-slim:disabled {{
-  opacity: 0.25;
-}}
-box.omapdf-overlay-toolbar button.tool-icon,
-box.omapdf-overlay-toolbar menubutton.tool-icon > button {{
-  padding: 5px;
-  min-width: 28px;
-  min-height: 28px;
+  min-height: 14px;
 }}
 box.omapdf-overlay-toolbar .page-indicator,
 box.omapdf-overlay-toolbar .zoom-indicator {{
@@ -262,34 +228,6 @@ box.omapdf-overlay-toolbar .zoom-indicator {{
   font-feature-settings: "tnum";
   letter-spacing: 0.02em;
   opacity: 0.62;
-}}
-box.omapdf-overlay-toolbar separator {{
-  background: transparent;
-  min-height: 14px;
-}}
-button.omapdf-ghost {{
-  background: transparent;
-  border: 1px solid alpha(currentColor, 0.28);
-  color: alpha(currentColor, 0.38);
-  border-radius: 0;
-  min-width: 36px;
-  min-height: 24px;
-  font-family: monospace;
-  font-size: 10.5px;
-  font-weight: 500;
-  margin: 2px 8px;
-}}
-button.omapdf-ink {{
-  background: @theme_fg_color;
-  color: @theme_bg_color;
-  border: none;
-  border-radius: 0;
-  min-width: 36px;
-  min-height: 24px;
-  font-family: monospace;
-  font-size: 10.5px;
-  font-weight: 500;
-  margin: 2px 8px;
 }}
 label.toast-banner {{
   background: @theme_fg_color;
@@ -328,6 +266,121 @@ listbox.omapdf-thumbs row.omapdf-thumb-inserted label {{
   opacity: 0.62;
 }}
 """.encode()
+
+
+def _overlay_rail_css() -> bytes:
+    """Editorial rail glyphs — loaded last so HeaderBar/Adwaita never fills tool buttons."""
+    return b"""
+box.omapdf-overlay-toolbar button,
+box.omapdf-overlay-toolbar menubutton > button {
+  background: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  -gtk-icon-shadow: none;
+  border-radius: 0;
+}
+box.omapdf-overlay-toolbar button.suggested-action,
+box.omapdf-overlay-toolbar button.destructive-action,
+box.omapdf-overlay-toolbar button.success,
+box.omapdf-overlay-toolbar button.flat,
+box.omapdf-overlay-toolbar button.toggle {
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  border: none;
+  color: inherit;
+}
+box.omapdf-overlay-toolbar button.tool-slim,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 2px 8px;
+  opacity: 0.62;
+  transition: opacity 120ms ease;
+}
+box.omapdf-overlay-toolbar button.tool-slim:hover,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:hover {
+  opacity: 1;
+  background: transparent;
+  background-image: none;
+}
+box.omapdf-overlay-toolbar button.tool-slim:active,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:active {
+  background: alpha(currentColor, 0.08);
+  background-image: none;
+  border-radius: 3px;
+}
+box.omapdf-overlay-toolbar button.tool-slim:checked,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:checked {
+  opacity: 1;
+  background-color: transparent;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 12px 1.5px;
+  background-repeat: no-repeat;
+  background-position: 50% calc(100% - 3px);
+  box-shadow: none;
+}
+box.omapdf-overlay-toolbar button.tool-slim:disabled,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:disabled {
+  opacity: 0.25;
+}
+box.omapdf-overlay-toolbar button.tool-icon,
+box.omapdf-overlay-toolbar menubutton.tool-icon > button {
+  padding: 5px;
+  min-width: 28px;
+  min-height: 28px;
+}
+box.omapdf-overlay-toolbar button.omapdf-ghost {
+  background: transparent;
+  background-image: none;
+  border: 1px solid alpha(currentColor, 0.28);
+  color: alpha(currentColor, 0.38);
+  border-radius: 0;
+  min-width: 36px;
+  min-height: 24px;
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  margin: 2px 8px;
+  box-shadow: none;
+}
+box.omapdf-overlay-toolbar button.omapdf-ink {
+  background: @theme_fg_color;
+  background-image: none;
+  color: @theme_bg_color;
+  border: none;
+  border-radius: 0;
+  min-width: 36px;
+  min-height: 24px;
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  margin: 2px 8px;
+  box-shadow: none;
+}
+"""
+
+
+WINDOW_CONTROLS_CSS = b"""
+headerbar.omapdf-window-controls {
+  min-height: 28px;
+  padding: 0 4px;
+  border: none;
+  box-shadow: none;
+  background: @theme_bg_color;
+}
+headerbar.omapdf-window-controls button.titlebutton {
+  border-radius: 6px;
+  min-width: 26px;
+  min-height: 22px;
+  margin: 2px;
+  padding: 2px 4px;
+}
+"""
 
 
 def _png_surface(path: str) -> cairo.ImageSurface:
@@ -701,7 +754,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
         win.set_default_size(980, 900)
-        win.set_decorated(False)
+        show_window_controls = window_controls_enabled()
+        if show_window_controls:
+            win.add_css_class("omapdf-window-controls-on")
+        else:
+            win.set_decorated(False)
         win.add_css_class("omapdf-editor")
         ed.window = win
         chrome = {
@@ -1374,8 +1431,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         chrome["light"] = _light
         chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
         css.load_from_data(_editorial_css(_light))
+        if show_window_controls:
+            css.load_from_data(WINDOW_CONTROLS_CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        rail_css = Gtk.CssProvider()
+        rail_css.load_from_data(_overlay_rail_css())
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            rail_css,
+            Gtk.STYLE_PROVIDER_PRIORITY_USER,
         )
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -2541,6 +2607,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         box.append(search_bar)
         box.append(overlay)
         win.set_child(box)
+        if show_window_controls:
+            header = Gtk.HeaderBar()
+            header.add_css_class("omapdf-window-controls")
+            header.set_show_title_buttons(True)
+            header.set_title_widget(Gtk.Box())  # empty — tools stay on the rail
+            win.set_titlebar(header)
 
         # Watch the file: when an agent (or anything else) saves changes to
         # it, refresh the view — the GUI half of the ask-the-agent loop.
