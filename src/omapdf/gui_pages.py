@@ -39,7 +39,7 @@ def build_page_sidebar(
     row_widgets: list[Gtk.Widget] = []
 
     side_list = Gtk.ListBox()
-    side_list.add_css_class("navigation-sidebar")
+    side_list.add_css_class("omapdf-thumbs")
 
     def pages_doc() -> pymupdf.Document:
         return ed.page_doc()
@@ -51,20 +51,26 @@ def build_page_sidebar(
         doc = pages_doc()
         for n in range(doc.page_count):
                 pg = doc[n]
-                s = 120 / pg.rect.width
-                pix = pg.get_pixmap(matrix=pymupdf.Matrix(s, s).prerotate(pg.rotation))
+                thumb_w = 84
+                scale = (thumb_w * 2) / pg.rect.width
+                pix = pg.get_pixmap(
+                    matrix=pymupdf.Matrix(scale, scale).prerotate(pg.rotation),
+                )
                 texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
                 pic = Gtk.Picture.new_for_paintable(texture)
-                pic.set_size_request(120, int(pg.rect.height * s))
+                pic.add_css_class("omapdf-thumb")
+                pic.set_size_request(thumb_w, int(pg.rect.height * thumb_w / pg.rect.width))
+                pic.set_content_fit(Gtk.ContentFit.FILL)
                 cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                cell.set_margin_top(6)
-                cell.set_margin_bottom(2)
-                cell.set_margin_start(4)
-                cell.set_margin_end(4)
+                cell.set_margin_top(8)
+                cell.set_margin_bottom(4)
+                cell.set_margin_start(8)
+                cell.set_margin_end(8)
                 cell.append(pic)
                 label = Gtk.Label(label=str(n + 1))
+                label.add_css_class("omapdf-thumb-num")
                 if (n + 1) in preview.inserted_pages:
-                    label.set_markup(f'<span foreground="#2e9e4f"><b>+ {n + 1}</b></span>')
+                    label.set_text(f"+ {n + 1}")
                 cell.append(label)
                 row = Gtk.ListBoxRow()
                 row.set_child(cell)
