@@ -3,8 +3,10 @@
 
 The window *is* the trackpad: a rounded pad surface. Space arms recording.
 While armed, the physical pad is read as an absolute 2D surface (evdev
-ABS_MT_POSITION_* / ABS_X/Y) and mapped onto the on-screen pad. A click is
-not required. Finger up ends a stroke; a new contact starts at that abs
+ABS_MT_POSITION_* / ABS_X/Y) and mapped onto the on-screen pad. The touchpad
+node is EVIOCGRAB'd so the compositor does not also move the system cursor;
+the keyboard is not grabbed (Space/Enter still work). A click is not
+required. Finger up ends a stroke; a new contact starts at that abs
 location. Relative pointer motion is fallback only when no abs axes can be
 opened. Enter writes SVG. Space while recording/recorded clears and starts
 over. `--click` is mouse click-and-drag fallback only.
@@ -159,22 +161,31 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
         if probe.device is None:
             return False
         device = probe.device
+        watcher = None
+        try:
 
-        def on_contacts(contacts):
-            for ev in contacts:
-                if ev.kind == "up":
-                    session.apply_abs("up")
-                elif ev.x is not None and ev.y is not None:
-                    gx, gy = device.map_point(ev.x, ev.y, glass_w, glass_h)
-                    session.apply_abs(ev.kind, gx, gy)
-            redraw()
+            def on_contacts(contacts):
+                for ev in contacts:
+                    if ev.kind == "up":
+                        session.apply_abs("up")
+                    elif ev.x is not None and ev.y is not None:
+                        gx, gy = device.map_point(ev.x, ev.y, glass_w, glass_h)
+                        session.apply_abs(ev.kind, gx, gy)
+                redraw()
 
-        from gi.repository import GLib
+            from gi.repository import GLib
 
-        watcher = AbsPadWatcher(device, on_contacts, idle_add=GLib.idle_add)
-        watcher.start()
+            watcher = AbsPadWatcher(device, on_contacts, idle_add=GLib.idle_add)
+            grabbed = watcher.start(exclusive=True)
+        except Exception:
+            if watcher is not None:
+                watcher.stop()
+            else:
+                device.close()
+            return False
         abs_stop = watcher.stop
         session.abs_active = True
+        session.grab_pointer = grabbed
         session.mapper.absolute = True
         return True
 
@@ -187,7 +198,6 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
         session.handle_space()
         if not click_mode and start_abs_reader():
             grab_release = _hide_cursor(win, area)
-            session.grab_pointer = False
         else:
             release, confined = _grab_pointer(win, area)
             grab_release = release
@@ -430,8 +440,11 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
     status = None
     win = None
     app.connect("activate", on_activate)
-    app.run(None)
-    return 0 if saved else 1
+    try:
+        app.run(None)
+        return 0 if saved else 1
+    finally:
+        release_grab()
 
 
 def _paint_trackpad(ctx, width, height, session: RecorderSession, cairo):
@@ -545,12 +558,10 @@ def _hide_cursor(win, area):
 
 
 def _grab_pointer(win, area) -> tuple:
-    """Confine the pointer to the pad window while recording (X11).
+    """X11-only relative-pointer fallback when no abs touchpad can be opened.
 
-    Used only as relative-pointer fallback when no abs touchpad can be
-    opened. GTK 4 removed gdk_seat_grab. On X11 we XGrabPointer + confine_to
-    the window. Returns (release_callable, confined). Wayland: hide the
-    window cursor; relative deltas keep ink on the pad.
+    Wayland/Hyprland cannot use XGrabPointer; the armed recorder's path is
+    EVIOCGRAB on the touchpad evdev node (see AbsPadWatcher.start).
     """
     restore_cursor = _hide_cursor(win, area)
 

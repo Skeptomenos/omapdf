@@ -7,7 +7,9 @@ While the recorder is armed we read the touchpad node directly
 pad. Relative pointer motion is fallback only when no abs axes can be
 opened.
 
-Do not EVIOCGRAB — the compositor must keep the device.
+While armed we EVIOCGRAB the *touchpad* node so libinput/the compositor
+do not also move the system cursor. The keyboard is never grabbed (Space
+and Enter must keep working). Ungrab on save, re-arm, close, and errors.
 """
 
 from __future__ import annotations
@@ -51,6 +53,15 @@ _ABSINFO = struct.Struct("iiiiii")
 
 def _ioc_read(nr: int, size: int) -> int:
     return (2 << 30) | (ord("E") << 8) | nr | (size << 16)
+
+
+def _ioc_write(nr: int, size: int) -> int:
+    return (1 << 30) | (ord("E") << 8) | nr | (size << 16)
+
+
+# linux/input.h: EVIOCGRAB _IOW('E', 0x90, int) — exclusive client.
+# Kernel treats a non-zero arg as grab, zero as ungrab. Touchpad fd only.
+EVIOCGRAB = _ioc_write(0x90, struct.calcsize("i"))
 
 
 def _EVIOCGNAME(n: int) -> int:
@@ -340,12 +351,42 @@ class EvdevAbsDevice:
     axes: AbsRange
     has_mt: bool
     parser: MtParser = field(default_factory=MtParser)
+    grabbed: bool = False
+    ioctl: object = field(default=fcntl.ioctl)
     _buf: bytearray = field(default_factory=bytearray)
 
     def map_point(
         self, abs_x: float, abs_y: float, pad_w: float, pad_h: float
     ) -> tuple[float, float]:
         return map_abs_to_pad(abs_x, abs_y, self.axes, pad_w, pad_h)
+
+    def grab(self) -> bool:
+        """EVIOCGRAB this touchpad so the compositor stops seeing its motion.
+
+        Does not grab the keyboard. Idempotent. False if ioctl fails.
+        """
+        if self.fd < 0:
+            return False
+        if self.grabbed:
+            return True
+        try:
+            self.ioctl(self.fd, EVIOCGRAB, 1)
+        except OSError:
+            self.grabbed = False
+            return False
+        self.grabbed = True
+        return True
+
+    def ungrab(self) -> None:
+        """Drop EVIOCGRAB. Idempotent; safe on a closed or never-grabbed fd."""
+        if not self.grabbed:
+            return
+        try:
+            if self.fd >= 0:
+                self.ioctl(self.fd, EVIOCGRAB, 0)
+        except OSError:
+            pass
+        self.grabbed = False
 
     def read_contacts(self) -> list[ContactEvent]:
         try:
@@ -366,12 +407,16 @@ class EvdevAbsDevice:
         return out
 
     def close(self) -> None:
-        fd, self.fd = self.fd, -1
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        """Ungrab then close. Always ungrabs, even if close fails."""
+        try:
+            self.ungrab()
+        finally:
+            fd, self.fd = self.fd, -1
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
 
 @dataclass
@@ -445,7 +490,7 @@ def _open_candidate(path: str) -> tuple[EvdevAbsDevice | None, bool]:
 
 
 def probe_abs_touchpad(paths: list[str] | None = None) -> AbsProbe:
-    """Open the best abs touchpad. Never grabs the fd."""
+    """Open the best abs touchpad. Does not grab; arming does."""
     if paths is None:
         paths = sorted(glob.glob("/dev/input/event*"))
     denied = False
@@ -480,7 +525,11 @@ def probe_abs_touchpad(paths: list[str] | None = None) -> AbsProbe:
 
 
 class AbsPadWatcher:
-    """Background reader; `idle_add` marshals contacts onto the GTK thread."""
+    """Background reader; exclusive-grabs the touchpad while running.
+
+    `idle_add` marshals contacts onto the GTK thread. Keyboard fds are
+    never opened or grabbed.
+    """
 
     def __init__(self, device: EvdevAbsDevice, on_contacts, *, idle_add) -> None:
         self.device = device
@@ -490,18 +539,42 @@ class AbsPadWatcher:
         self._thread = threading.Thread(
             target=self._run, name="omepreview-abs-pad", daemon=True
         )
+        self._started = False
+        self._cleaned = False
 
-    def start(self) -> None:
+    def start(self, *, exclusive: bool = True) -> bool:
+        """Read the pad. exclusive=True EVIOCGRAB so the cursor stays put."""
+        grabbed = False
         try:
-            os.set_blocking(self.device.fd, False)
-        except OSError:
-            pass
-        self._thread.start()
+            if exclusive:
+                grabbed = self.device.grab()
+            try:
+                os.set_blocking(self.device.fd, False)
+            except OSError:
+                pass
+            self._thread.start()
+            self._started = True
+            return grabbed
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self) -> None:
+        """Ungrab and close. Idempotent; safe if start() never ran."""
         self._stop.set()
-        self._thread.join(timeout=1.0)
-        self.device.close()
+        if self._started:
+            self._thread.join(timeout=1.0)
+            self._started = False
+        self._cleanup_device()
+
+    def _cleanup_device(self) -> None:
+        if self._cleaned:
+            return
+        self._cleaned = True
+        try:
+            self.device.ungrab()
+        finally:
+            self.device.close()
 
     def _run(self) -> None:
         fd = self.device.fd
