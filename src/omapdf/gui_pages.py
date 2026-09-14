@@ -51,12 +51,16 @@ def build_page_sidebar(
         doc = pages_doc()
         for n in range(doc.page_count):
                 pg = doc[n]
-                s = 84 / pg.rect.width
-                pix = pg.get_pixmap(matrix=pymupdf.Matrix(s, s).prerotate(pg.rotation))
+                thumb_w = 84
+                scale = (thumb_w * 2) / pg.rect.width
+                pix = pg.get_pixmap(
+                    matrix=pymupdf.Matrix(scale, scale).prerotate(pg.rotation),
+                )
                 texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
                 pic = Gtk.Picture.new_for_paintable(texture)
                 pic.add_css_class("omapdf-thumb")
-                pic.set_size_request(84, int(pg.rect.height * s))
+                pic.set_size_request(thumb_w, int(pg.rect.height * thumb_w / pg.rect.width))
+                pic.set_content_fit(Gtk.ContentFit.FILL)
                 cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
                 cell.set_margin_top(8)
                 cell.set_margin_bottom(4)
@@ -64,6 +68,7 @@ def build_page_sidebar(
                 cell.set_margin_end(8)
                 cell.append(pic)
                 label = Gtk.Label(label=str(n + 1))
+                label.add_css_class("omapdf-thumb-num")
                 if (n + 1) in preview.inserted_pages:
                     label.set_text(f"+ {n + 1}")
                 cell.append(label)

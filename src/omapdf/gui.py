@@ -120,12 +120,35 @@ def _luminance(r: float, g: float, b: float) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def _theme_colors(widget: Gtk.Widget) -> tuple[tuple[float, float, float], tuple[float, float, float], bool]:
+def _color_scheme_is_dark() -> bool:
+    """Honor Omarchy/GNOME color-scheme (same source as omarchy-theme-set-gnome)."""
+    try:
+        iface = Gio.Settings.new("org.gnome.desktop.interface")
+        scheme = iface.get_string("color-scheme")
+        if scheme == "prefer-dark":
+            return True
+        if scheme == "prefer-light":
+            return False
+    except Exception:
+        pass
+    gtk_settings = Gtk.Settings.get_default()
+    if gtk_settings is not None:
+        return gtk_settings.get_property("gtk-application-prefer-dark-theme")
+    return False
+
+
+def _sync_color_scheme() -> None:
+    dark = _color_scheme_is_dark()
+    gtk_settings = Gtk.Settings.get_default()
+    if gtk_settings is not None:
+        gtk_settings.set_property("gtk-application-prefer-dark-theme", dark)
+
+
+def _theme_colors(widget: Gtk.Widget) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     style = widget.get_style_context()
     bg = style.lookup_color("theme_bg_color")[1]
     fg = style.lookup_color("theme_fg_color")[1]
-    light = _luminance(bg.red, bg.green, bg.blue) > 0.5
-    return (bg.red, bg.green, bg.blue), (fg.red, fg.green, fg.blue), light
+    return (bg.red, bg.green, bg.blue), (fg.red, fg.green, fg.blue)
 
 
 def _desk_rgb(bg: tuple[float, float, float], light: bool) -> tuple[float, float, float]:
@@ -281,11 +304,17 @@ listbox.omapdf-thumbs row {{
   background: transparent;
   padding: 0;
 }}
-listbox.omapdf-thumbs row:not(.omapdf-thumb-selected) {{
+picture.omapdf-thumb {{
+  box-shadow: 0 1px 2px alpha(black, 0.10), 0 1px 3px alpha(black, 0.08);
+  outline: 1px solid alpha(currentColor, 0.08);
+}}
+listbox.omapdf-thumbs row:not(.omapdf-thumb-selected) picture.omapdf-thumb {{
   opacity: {thumb_muted};
 }}
 listbox.omapdf-thumbs row.omapdf-thumb-selected picture.omapdf-thumb {{
+  opacity: 1;
   box-shadow: 0 3px 5px alpha(black, 0.08), 0 1px 1px alpha(black, 0.14);
+  outline: none;
 }}
 listbox.omapdf-thumbs row label {{
   font-family: monospace;
@@ -663,6 +692,7 @@ class Editor:
 
 
 def run(pdf: str, ops_file: str | None = None) -> int:
+    _sync_color_scheme()
     ed = Editor(pdf, ops_file)
     app = Gtk.Application(
         application_id="org.omapdf.Editor", flags=Gio.ApplicationFlags.NON_UNIQUE
@@ -1337,7 +1367,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         # -- toolbar ------------------------------------------------------
 
         css = Gtk.CssProvider()
-        _bg, _fg, _light = _theme_colors(win)
+        _light = not _color_scheme_is_dark()
+        _bg, _fg = _theme_colors(win)
         chrome["desk"] = _desk_rgb(_bg, _light)
         chrome["fg"] = _fg
         chrome["light"] = _light

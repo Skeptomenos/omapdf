@@ -10,6 +10,33 @@ from pathlib import Path
 import pymupdf
 
 
+def make_editorial_demo_pdf(
+    path: Path | str,
+    page_count: int = 3,
+) -> Path:
+    """Multi-page PDF with centred folio numerals visible at thumbnail size."""
+    path = Path(path)
+    doc = pymupdf.open()
+    for n in range(1, page_count + 1):
+        page = doc.new_page(width=595, height=842)
+        page.draw_rect(
+            pymupdf.Rect(48, 48, 547, 794),
+            color=(0.82, 0.82, 0.82),
+            width=0.75,
+        )
+        page.insert_textbox(
+            pymupdf.Rect(48, 300, 547, 500),
+            str(n),
+            fontsize=56,
+            fontname="helv",
+            align=pymupdf.TEXT_ALIGN_CENTER,
+        )
+        page.insert_text((48, 72), f"demo · page {n}", fontsize=10)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
 def make_labeled_pdf(
     path: Path | str,
     page_count: int = 6,
