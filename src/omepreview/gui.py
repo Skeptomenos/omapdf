@@ -42,7 +42,14 @@ from . import engine
 from . import gui_pages
 from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
+from .ops import OpError
 from .page_preview import PagePreviewState
+from .redact_io import (
+    match_redact_ghosts,
+    redact_item_to_op,
+    share_target_path,
+    unused_sibling,
+)
 from .view_gestures import (
     HANDLE_VISUAL_HALF,
     SELECT_HANDLE_PAD,
@@ -574,6 +581,73 @@ class Editor:
         self.selected = None
         return True
 
+    def adopt_document(self, path: str) -> None:
+        """Open *path* as the active document (watcher/title follow ``self.path``)."""
+        new_path = str(Path(path).resolve())
+        if self.doc is not None and not self.doc.is_closed:
+            self.doc.close()
+        self.invalidate_view()
+        self.path = new_path
+        self.doc = pymupdf.open(self.path)
+        self.page_preview.retarget(self.path)
+
+    def save_pending(self) -> dict:
+        """Apply ghosts through the engine. Returns the active path after save.
+
+        Redaction copy-save writes a unique ``*_redacted.pdf`` (never clobbers
+        an existing file) and switches the editor onto that copy so Share
+        attaches the redacted bytes.
+        """
+        markup_ops = self.to_ops()
+        page_ops = copy.deepcopy(self.page_preview.page_ops)
+        if not markup_ops and not page_ops:
+            raise OpError("nothing to save")
+        redact_ops = [op for op in markup_ops if op["op"] == "redact"]
+        other_markup = [op for op in markup_ops if op["op"] != "redact"]
+        source = Path(self.path)
+        file_before = source.read_bytes()
+        pending_before = copy.deepcopy(self.pending)
+        page_ops_before = copy.deepcopy(self.page_preview.page_ops)
+        self.doc.close()
+        self.invalidate_view()
+        self.page_preview._drop_scratch()
+        created_copy: Path | None = None
+        work_path = source
+        try:
+            if redact_ops and self.redact_save_as_copy:
+                created_copy = unused_sibling(source, "_redacted")
+                shutil.copy2(source, created_copy)
+                work_path = created_copy
+            for op in page_ops:
+                engine.apply(work_path, [op], output=work_path)
+            if other_markup:
+                engine.apply(work_path, other_markup, output=work_path)
+            if redact_ops:
+                engine.apply(work_path, redact_ops, output=work_path)
+        except Exception:
+            if created_copy is not None:
+                created_copy.unlink(missing_ok=True)
+            self.doc = pymupdf.open(self.path)
+            self.invalidate_view()
+            self.page_preview.rebuild()
+            raise
+        if created_copy is not None:
+            self.adopt_document(str(created_copy))
+        else:
+            self.doc = pymupdf.open(self.path)
+            self.invalidate_view()
+            self.page_preview.clear()
+        self.record_save(file_before, pending_before, page_ops_before)
+        self.pending.clear()
+        self.selected = None
+        self.page_no = min(self.page_no, self.page_count() - 1)
+        return {
+            "path": self.path,
+            "redacted_copy": str(created_copy) if created_copy else None,
+            "saved": len(page_ops) + len(markup_ops),
+            "original": str(source),
+        }
+
     def sig_aspect(self, name: str | None = None) -> float:
         surface = self._ensure_sig(name)
         return surface.get_height() / surface.get_width() if surface else 0.4
@@ -648,21 +722,15 @@ class Editor:
             elif kind == "redact":
                 if "rect" in op:
                     r = op["rect"]
-                    item = {
+                    self.pending.append({
                         "kind": "redact", "page": page,
                         "x0": r[0], "y0": r[1], "x1": r[2], "y1": r[3],
-                    }
+                    })
                 else:
                     rects = self.doc[page].search_for(op["match"])
-                    if not rects:
-                        continue
-                    r = rects[0]
-                    item = {
-                        "kind": "redact", "page": page,
-                        "x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1,
-                        "match": op["match"],
-                    }
-                self.pending.append(item)
+                    self.pending.extend(
+                        match_redact_ghosts(page, op["match"], rects)
+                    )
         if self.pending:
             self.selected = self.pending[0]
             self.page_no = self.pending[0]["page"]
@@ -705,13 +773,7 @@ class Editor:
                     x0, y0, x1, y1 = _norm_rect(it)
                     ops.append({**base, "rect": [x0, y0, x1, y1]})
             elif it["kind"] == "redact":
-                if it.get("match"):
-                    ops.append({"op": "redact", "page": page,
-                                "match": it["match"], "fill": [0, 0, 0]})
-                else:
-                    x0, y0, x1, y1 = _norm_rect(it)
-                    ops.append({"op": "redact", "page": page,
-                                "rect": [x0, y0, x1, y1], "fill": [0, 0, 0]})
+                ops.append(redact_item_to_op(it))
             elif it["kind"] == "field_fill":
                 ops.append({"op": "fill_field", "field": it["field"], "value": it["value"]})
             elif it["kind"] == "delete_annot":
@@ -882,6 +944,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         }
 
         save_style_hook = {"fn": lambda: None}
+        file_watch = {"retarget": lambda: None}
 
         def refresh_title():
             dirty = ed.pending or ed.page_preview.has_changes()
@@ -2504,18 +2567,28 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed.pending or ed.page_preview.has_changes():
                 toast("Unsaved changes — Save before sharing")
                 return None
-            if flatten_check.get_active():
-                out = str(Path(ed.path).with_name(Path(ed.path).stem + "-final.pdf"))
-                engine.flatten(ed.path, output=out)
-                toast(f"Sharing flattened copy: {Path(out).name}")
-                return out
-            return ed.path
+            flatten = flatten_check.get_active()
+            try:
+                dest = share_target_path(
+                    ed.path,
+                    flatten=flatten,
+                    flatten_fn=engine.flatten if flatten else None,
+                )
+            except Exception as exc:
+                toast(f"Share failed: {exc}")
+                return None
+            if flatten:
+                toast(f"Sharing flattened copy: {dest.name}")
+            return str(dest)
 
         def share_action(fn):
             def go(_b):
                 popover_try_popdown(share_pop)
                 path = share_target()
                 if path:
+                    probe = os.environ.get("OMEPREVIEW_SHARE_PROBE")
+                    if probe:
+                        Path(probe).write_text(str(Path(path).resolve()) + "\n")
                     try:
                         fn(path)
                     except Exception as exc:
@@ -2735,60 +2808,27 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         finish_redact_drag["fn"] = after_redact_drag
 
         def on_save(_b):
-            markup_ops = ed.to_ops()
-            page_ops = copy.deepcopy(ed.page_preview.page_ops)
-            if not markup_ops and not page_ops:
+            if not ed.pending and not ed.page_preview.has_changes():
                 toast("Nothing to save")
                 return
-            redact_ops = [op for op in markup_ops if op["op"] == "redact"]
-            other_markup = [op for op in markup_ops if op["op"] != "redact"]
-            file_before = Path(ed.path).read_bytes()
-            pending_before = copy.deepcopy(ed.pending)
-            page_ops_before = copy.deepcopy(ed.page_preview.page_ops)
-            ed.doc.close()
-            ed.invalidate_view()
-            ed.page_preview._drop_scratch()
             mark_self_write()
-            work_path = ed.path
-            redacted_copy = None
-            if redact_ops and ed.redact_save_as_copy:
-                redacted_copy = str(
-                    Path(ed.path).with_name(Path(ed.path).stem + "_redacted.pdf")
-                )
-                shutil.copy2(ed.path, redacted_copy)
-                work_path = redacted_copy
             try:
-                for op in page_ops:
-                    engine.apply(work_path, [op], output=work_path)
-                if other_markup:
-                    engine.apply(work_path, other_markup, output=work_path)
-                if redact_ops:
-                    engine.apply(work_path, redact_ops, output=work_path)
-            except Exception as exc:  # surface engine errors in the UI
+                result = ed.save_pending()
+            except Exception as exc:
                 toast(f"Save failed: {exc}")
-                if redacted_copy and Path(redacted_copy).exists():
-                    Path(redacted_copy).unlink()
-                ed.doc = pymupdf.open(ed.path)
-                ed.invalidate_view()
-                ed.page_preview.rebuild()
                 render_page()
                 return
-            ed.doc = pymupdf.open(ed.path)
-            ed.page_preview.clear()
-            ed.invalidate_view()
-            ed.record_save(file_before, pending_before, page_ops_before)
-            ed.pending.clear()
-            ed.selected = None
-            ed.page_no = min(ed.page_no, ed.page_count() - 1)
+            file_watch["retarget"]()
             render_page()
-            saved = len(page_ops) + len(markup_ops)
-            if redacted_copy:
+            sidebar_api["refresh"]()
+            refresh_title()
+            if result["redacted_copy"]:
                 toast(
-                    f"Saved {saved} change(s) to {Path(redacted_copy).name} "
-                    "— original unchanged"
+                    f"Saved {result['saved']} change(s) to "
+                    f"{Path(result['path']).name} — original unchanged"
                 )
             else:
-                toast(f"Saved {saved} change(s) — Ctrl+Z reverts the save")
+                toast(f"Saved {result['saved']} change(s) — Ctrl+Z reverts the save")
             celebrate_save()
 
         save_btn.connect("clicked", on_save)
@@ -3209,6 +3249,22 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             GLib.timeout_add(200, reload)
 
         monitor.connect("changed", on_disk_change)
+        watch_state = {"monitor": monitor}
+
+        def retarget_watch():
+            old = watch_state["monitor"]
+            try:
+                old.cancel()
+            except Exception:
+                pass
+            m = Gio.File.new_for_path(ed.path).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            m.connect("changed", on_disk_change)
+            watch_state["monitor"] = m
+            win._omapdf_monitor = m
+
+        file_watch["retarget"] = retarget_watch
         win._omapdf_monitor = monitor  # keep the watcher alive
 
         sidebar_api["refresh"]()

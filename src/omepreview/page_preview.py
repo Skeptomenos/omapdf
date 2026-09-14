@@ -22,6 +22,11 @@ class PagePreviewState:
         self.inserted_pages: set[int] = set()  # 1-based pages in scratch view
         self._temp_sources: list[Path] = []
 
+    def retarget(self, source: str | Path):
+        """Point the preview at a different file (e.g. after save-as-copy)."""
+        self.clear()
+        self.source = str(Path(source).resolve())
+
     def has_changes(self) -> bool:
         return bool(self.page_ops)
 

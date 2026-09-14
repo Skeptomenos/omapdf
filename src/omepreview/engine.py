@@ -320,17 +320,15 @@ def _apply_insert_pages(doc, op) -> dict:
 
 
 def _text_in_rects(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> bool:
-    """True when extractable text still intersects any of the redaction rects."""
-    for block in page.get_text("blocks"):
-        if len(block) < 5:
-            continue
-        snippet = str(block[4]).strip()
-        if not snippet:
-            continue
-        br = pymupdf.Rect(block[:4])
-        for rect in rects:
-            if br.intersects(rect):
-                return True
+    """True when extractable text still remains *inside* a redaction rect.
+
+    Uses the clip, not block-intersection: a word-sized rect on a longer
+    line must not fail verify just because neighboring words still exist.
+    """
+    for rect in rects:
+        snippet = page.get_textbox(rect).strip()
+        if snippet:
+            return True
     return False
 
 
@@ -363,6 +361,14 @@ def _apply_delete_annotation(doc, op, *, dry_run: bool) -> dict:
     return result
 
 
+def _redact_annots(page) -> list:
+    return [
+        annot
+        for annot in (page.annots() or [])
+        if annot.type[0] == pymupdf.PDF_ANNOT_REDACT
+    ]
+
+
 def _apply_redact(doc, op, *, dry_run: bool) -> dict:
     page = _page(doc, op["page"])
     fill = tuple(op.get("fill", [0, 0, 0]))
@@ -385,6 +391,15 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
 
     if dry_run:
         return result
+
+    if apply_now:
+        pending = _redact_annots(page)
+        if pending:
+            raise OpError(
+                f"page {op['page']} already has {len(pending)} pending "
+                "redaction annotation(s); apply or delete them first so this "
+                "redact does not also remove unapproved regions"
+            )
 
     if not apply_now:
         for rect in rects:
@@ -471,8 +486,18 @@ def _save(doc: pymupdf.Document, source: Path, output: Path) -> None:
             os.unlink(tmp)
             raise
     else:
-        doc.save(str(output), garbage=3, deflate=True)
-        doc.close()
+        fd, tmp = tempfile.mkstemp(dir=str(output.parent), suffix=".pdf")
+        os.close(fd)
+        try:
+            doc.save(tmp, garbage=3, deflate=True)
+            doc.close()
+            os.replace(tmp, output)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
 
 def _order_ops(ops: list[dict]) -> list[dict]:
