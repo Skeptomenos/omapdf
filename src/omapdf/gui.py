@@ -116,68 +116,64 @@ def _draw_shape(
         ctx.restore()
 
 CSS = b"""
-headerbar button.save-btn {
-  background: linear-gradient(180deg, #4a95ee, #2f74d0);
-  color: white;
-  font-weight: 600;
-  border: none;
-  border-radius: 9px;
-  min-width: 58px;
-  min-height: 28px;
-  padding-left: 12px;
-  padding-right: 12px;
-  box-shadow: 0 1px 2px alpha(black, 0.35), inset 0 1px 0 alpha(white, 0.16);
+box.omapdf-overlay-toolbar {
+  background: alpha(@theme_bg_color, 0.82);
+  border-left: 1px solid alpha(currentColor, 0.18);
+  padding: 6px 4px;
+  margin: 8px 8px 8px 0;
 }
-headerbar button.save-btn:hover {
-  background: linear-gradient(180deg, #5aa2f4, #3a80dc);
-}
-headerbar button.save-btn:active { background: #2f74d0; }
-headerbar button.save-btn.save-success {
-  background: linear-gradient(180deg, #43b768, #2e9e4f);
-}
-headerbar button.tool-slim,
-headerbar menubutton.tool-slim > button {
+box.omapdf-overlay-toolbar button.tool-slim,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button {
   background: transparent;
   border: none;
   box-shadow: none;
-  border-radius: 8px;
+  border-radius: 0;
   padding-left: 8px;
   padding-right: 8px;
   min-width: 0;
   min-height: 28px;
 }
-headerbar button.tool-slim:hover,
-headerbar menubutton.tool-slim > button:hover { background: alpha(currentColor, 0.10); }
-headerbar button.tool-slim:active,
-headerbar menubutton.tool-slim > button:active { background: alpha(currentColor, 0.16); }
-headerbar button.tool-slim:checked { background: alpha(#3584e4, 0.32); }
-headerbar button.tool-icon,
-headerbar menubutton.tool-icon > button { padding: 5px; min-width: 28px; min-height: 28px; }
-headerbar .page-indicator { opacity: 0.85; font-weight: 500; }
-headerbar separator {
+box.omapdf-overlay-toolbar button.tool-slim:hover,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:hover {
+  background: alpha(currentColor, 0.08);
+}
+box.omapdf-overlay-toolbar button.tool-slim:active,
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:active {
+  background: alpha(currentColor, 0.16);
+}
+box.omapdf-overlay-toolbar button.tool-slim:checked {
+  background: alpha(currentColor, 0.18);
+}
+box.omapdf-overlay-toolbar button.tool-icon,
+box.omapdf-overlay-toolbar menubutton.tool-icon > button {
+  padding: 5px;
+  min-width: 28px;
+  min-height: 28px;
+}
+box.omapdf-overlay-toolbar .page-indicator { opacity: 0.85; font-weight: 500; }
+box.omapdf-overlay-toolbar separator {
   background: alpha(currentColor, 0.22);
-  margin-top: 12px;
-  margin-bottom: 12px;
-  margin-left: 1px;
-  margin-right: 1px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  min-height: 1px;
 }
 label.toast-banner {
-  background: rgba(35, 35, 40, 0.88);
-  color: white;
-  border-radius: 9px;
+  background: alpha(currentColor, 0.88);
+  color: @theme_bg_color;
+  border-radius: 0;
   padding: 7px 16px;
   margin-top: 8px;
 }
 listbox row.omapdf-thumb-selected {
-  background: alpha(#2f74d0, 0.22);
-  border-radius: 6px;
+  background: alpha(currentColor, 0.18);
+  border-radius: 0;
 }
 listbox row.omapdf-thumb-inserted {
-  border: 1px solid alpha(#2e9e4f, 0.55);
-  border-radius: 6px;
+  border: 1px solid alpha(currentColor, 0.35);
+  border-radius: 0;
 }
 scrolledwindow.omapdf-page-canvas {
-  background-color: rgb(56, 56, 60);
+  background-color: alpha(currentColor, 0.12);
 }
 """
 
@@ -552,6 +548,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
         win.set_default_size(980, 900)
+        win.set_decorated(False)
         ed.window = win
 
         area = Gtk.DrawingArea()
@@ -1214,7 +1211,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        header = Gtk.HeaderBar()
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        toolbar.add_css_class("omapdf-overlay-toolbar")
+        toolbar.set_can_target(True)
         tools = {}
         first_btn = None
 
@@ -1379,7 +1378,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             btn = Gtk.ToggleButton()
             btn.add_css_class("tool-slim")
             btn.add_css_class("tool-icon")
-            btn.set_valign(Gtk.Align.CENTER)
             btn.set_child(icon_widget(painter))
             btn.set_tooltip_text(tip)
             if first_btn is None:
@@ -1388,20 +1386,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 btn.set_group(first_btn)
             btn.connect("toggled", lambda b: b.get_active() and setattr(ed, "tool", name))
             tools[name] = btn
-            header.pack_start(btn)
+            toolbar.append(btn)
             return btn
 
         def tool_sep():
-            sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-            header.pack_start(sep)
+            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            toolbar.append(sep)
 
         side_toggle = Gtk.ToggleButton()
         side_toggle.add_css_class("tool-slim")
         side_toggle.add_css_class("tool-icon")
-        side_toggle.set_valign(Gtk.Align.CENTER)
         side_toggle.set_child(icon_widget(paint_sidebar))
         side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
-        header.pack_start(side_toggle)
+        toolbar.append(side_toggle)
         tool_sep()
 
         make_tool("select", "Select — click an item, drag to move (Esc deselects, Del removes)",
@@ -1571,7 +1568,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         for nav_b in (prev_b, next_b):
             nav_b.add_css_class("tool-slim")
             nav_b.add_css_class("tool-icon")
-            nav_b.set_valign(Gtk.Align.CENTER)
         prev_b.set_tooltip_text("Previous page (PgUp)")
         next_b.set_tooltip_text("Next page (PgDn)")
 
@@ -1595,7 +1591,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         page_btn = Gtk.MenuButton()
         page_btn.add_css_class("flat")
         page_btn.add_css_class("tool-slim")
-        page_btn.set_valign(Gtk.Align.CENTER)
         page_label.add_css_class("page-indicator")
         page_btn.set_child(page_label)
         page_btn.set_tooltip_text("Go to page (Ctrl+G)")
@@ -1617,11 +1612,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         goto_entry.connect("activate", on_goto)
 
-        nav = Gtk.Box(spacing=4)
+        nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         nav.append(prev_b)
         nav.append(page_btn)
         nav.append(next_b)
-        header.set_title_widget(nav)
 
         def update_nav():
             # Single-page documents get no pager at all; otherwise the
@@ -1632,8 +1626,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             next_b.set_sensitive(ed.page_no < ed.page_count() - 1)
 
         save_btn = Gtk.Button(label="Save")
-        save_btn.add_css_class("save-btn")
-        save_btn.set_valign(Gtk.Align.CENTER)
+        save_btn.add_css_class("suggested-action")
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
@@ -1641,7 +1634,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         for icon_b in (undo_b, redo_b):
             icon_b.add_css_class("tool-slim")
             icon_b.add_css_class("tool-icon")
-            icon_b.set_valign(Gtk.Align.CENTER)
 
         def do_undo():
             mark_self_write()
@@ -1673,7 +1665,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         zoom_dot = Gtk.Label()
         zoom_btn = Gtk.MenuButton()
         zoom_btn.add_css_class("tool-slim")
-        zoom_btn.set_valign(Gtk.Align.CENTER)
         zoom_btn.set_child(zoom_dot)
         zoom_btn.set_tooltip_text("Zoom (pinch, Ctrl+scroll; Ctrl+0 fits page)")
         zoom_pop = Gtk.Popover()
@@ -1699,7 +1690,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_btn.set_tooltip_text("Search (Ctrl+F)")
         search_btn.add_css_class("tool-slim")
         search_btn.add_css_class("tool-icon")
-        search_btn.set_valign(Gtk.Align.CENTER)
 
         # -- ask the agent (Omarchy's native default agent) ---------------
 
@@ -1708,7 +1698,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         ask_btn.set_tooltip_text("Ask your agent about this document")
         ask_btn.add_css_class("tool-slim")
         ask_btn.add_css_class("tool-icon")
-        ask_btn.set_valign(Gtk.Align.CENTER)
         ask_pop = Gtk.Popover()
         # Shift left of the spark button so the popover stays inside the
         # window instead of overhanging the neighboring tile.
@@ -1765,7 +1754,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         share_btn.set_tooltip_text("Share — send this PDF somewhere")
         share_btn.add_css_class("tool-slim")
         share_btn.add_css_class("tool-icon")
-        share_btn.set_valign(Gtk.Align.CENTER)
         share_pop = Gtk.Popover()
         share_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         flatten_check = Gtk.CheckButton(label="Flatten copy first")
@@ -1841,21 +1829,29 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         share_pop.set_child(share_box)
         share_btn.set_popover(share_pop)
 
-        header.pack_end(save_btn)
-        header.pack_end(share_btn)
-        header.pack_end(ask_btn)
-        header.pack_end(redo_b)
-        header.pack_end(undo_b)
-        header.pack_end(zoom_btn)
-        header.pack_end(search_btn)
-        win.set_titlebar(header)
+        tool_sep()
+        toolbar.append(search_btn)
+        toolbar.append(zoom_btn)
+        toolbar.append(undo_b)
+        toolbar.append(redo_b)
+        toolbar.append(nav)
+        tool_sep()
+        toolbar.append(ask_btn)
+        toolbar.append(share_btn)
+        toolbar.append(save_btn)
+
+        toolbar_wrap = Gtk.Box()
+        toolbar_wrap.set_halign(Gtk.Align.END)
+        toolbar_wrap.set_valign(Gtk.Align.START)
+        toolbar_wrap.set_can_target(True)
+        toolbar_wrap.append(toolbar)
 
         def celebrate_save():
-            # A little cheer: the Save button flips green with a same-size 👍
+            # A little cheer: the Save button flips to success with a same-size 👍
             # (no layout jiggle), while a bigger thumbs-up pops in an overlay
             # floating just beneath it — small → big → settle — then fades.
             label = save_btn.get_child()
-            save_btn.add_css_class("save-success")
+            save_btn.add_css_class("success")
             save_btn.set_sensitive(False)
             label.set_text("👍")
             frames = [(0, "11000"), (90, "18000"), (200, "24000"),
@@ -1867,7 +1863,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 )
 
             def restore():
-                save_btn.remove_css_class("save-success")
+                save_btn.remove_css_class("success")
                 save_btn.set_sensitive(True)
                 label.set_text("Save")
                 cheer_label.set_text("")
@@ -1875,8 +1871,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             GLib.timeout_add(1400, restore)
 
-        # Toast: a banner that slides down from under the header, floats over
-        # the page (no layout jump), and dismisses itself after 5 seconds.
+        # Toast: a banner that slides down from the top, floats over the page
+        # (no layout jump), and dismisses itself after 5 seconds.
         toast_label = Gtk.Label()
         toast_label.add_css_class("toast-banner")
         toast_revealer = Gtk.Revealer()
@@ -2351,8 +2347,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         cheer_label = Gtk.Label()
         cheer_label.set_halign(Gtk.Align.END)
         cheer_label.set_valign(Gtk.Align.START)
-        cheer_label.set_margin_end(24)
-        cheer_label.set_margin_top(2)
+        cheer_label.set_margin_end(56)
+        cheer_label.set_margin_top(8)
         cheer_label.set_can_target(False)
         overlay = Gtk.Overlay()
         overlay.set_child(content)
@@ -2360,6 +2356,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         overlay.set_hexpand(True)
         overlay.add_overlay(toast_revealer)
         overlay.add_overlay(cheer_label)
+        overlay.add_overlay(toolbar_wrap)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.set_vexpand(True)
         box.append(search_bar)
@@ -2406,7 +2403,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             side_toggle.set_active(True)
 
         def log_layout_sizes(_src=None, _pspec=None):
-            header_w = header.get_width() or header.get_allocated_width()
+            toolbar_w = toolbar.get_width() or toolbar.get_allocated_width()
             scroll_w = scroller.get_width() or scroller.get_allocated_width()
             area_w = area.get_width() or area.get_allocated_width()
             area_h = area.get_height() or area.get_allocated_height()
@@ -2415,7 +2412,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 (surf.get_width(), surf.get_height()) if surf is not None else None
             )
             print(
-                f"omapdf layout: header={header_w} scroller={scroll_w} "
+                f"omapdf layout: toolbar={toolbar_w} scroller={scroll_w} "
                 f"drawing_area={area_w}x{area_h} page_surface={surf_sz} zoom={ed.zoom:.3f}",
                 file=sys.stderr,
                 flush=True,
