@@ -1,71 +1,74 @@
 # omepreview
 
-**Preview.app for Linux** — a fast GTK4 PDF viewer with an editorial studio look, a scriptable CLI, and an agent-ready op engine underneath.
+**A Preview-class PDF studio for Omarchy and plain GTK Linux.**
 
-Open a document, read and annotate with calm paper-on-desk chrome, sign with a trackpad-style recorder, and hand the same operations to your agent when you want automation.
+omepreview is a fast GTK4 editor for reading, marking up, and signing PDFs — with Preview-style page surgery, true redaction, and trackpad signatures. One calm editorial surface for humans; one JSON op engine underneath for agents.
 
 <p align="center">
-  <img src="docs/screenshots/fit-light.png" alt="omepreview editor — light theme, Fit page" width="720" />
+  <img src="docs/screenshots/gtk-light-fit-editorial.png" alt="omepreview — light theme, page fit" width="720" />
 </p>
 
 <p align="center">
-  <em>Light · Fit page</em> &nbsp;·&nbsp;
-  <a href="docs/screenshots/fit-dark.png">Dark Fit</a> &nbsp;·&nbsp;
-  <a href="docs/screenshots/zoom-light.png">Zoom</a>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/fit-dark.png" alt="omepreview editor — dark theme" width="360" />
+  <img src="docs/screenshots/gtk-dark-fit-editorial.png" alt="omepreview — dark theme" width="360" />
   &nbsp;
-  <img src="docs/screenshots/zoom-light.png" alt="omepreview editor — zoomed page" width="360" />
+  <img src="docs/screenshots/gtk-light-zoom-into-page.png" alt="omepreview — zoomed page" width="360" />
 </p>
 
-## Why
+<p align="center">
+  <img src="docs/screenshots/gtk-light-save-ghost.png" alt="omepreview — ghost Save on the overlay rail" width="200" />
+</p>
 
-The “open a PDF, highlight two clauses, sign it, send it back” workflow is Preview’s killer feature — and Linux deserves something as fast and pleasant, without giving up automation. omepreview is both: a human editor you actually want to stare at, and a stable JSON op contract agents can drive.
+---
+
+## What you get
+
+| Surface | Role |
+|--------|------|
+| **GTK editor** | Paper-on-desk chrome, overlay tool rail, thumbnails, pinch zoom |
+| **CLI** | `read`, `edit`, `sign`, `pages`, `apply` — scriptable and agent-friendly |
+| **MCP** | `omepreview-mcp` optional extra; same ops as the CLI |
+| **Signatures** | Preview-style trackpad recorder (`omepreview sig draw`) + placement on the page |
+
+**Page knife** — insert, delete, rotate, extract, reorder via sidebar or ops.  
+**True redact** — content removal, not just black rectangles.  
+**Editorial rail** — transparent glyphs at 62% ink; ghost Save until you have pending work.
+
+Forked from [omapdf](https://github.com/pbergin11/omapdf). omepreview is its own product.
 
 ## Install
 
 ```bash
+git clone https://github.com/Skeptomenos/omepreview.git
+cd omepreview
 python -m venv --system-site-packages .venv   # keeps system GTK bindings
 .venv/bin/pip install -e '.[dev]'
 ```
 
-Arch users: see [`packaging/PKGBUILD`](packaging/PKGBUILD).
-
-**Version:** `0.0.1` (first release)
+Arch: [`packaging/PKGBUILD`](packaging/PKGBUILD) (`pkgver=0.0.1`).
 
 ## Quick start
 
 ```bash
-omepreview edit document.pdf          # GTK editor (default handler for PDFs)
-omepreview read document.pdf --json   # text, bboxes, fields — agent-friendly
-omepreview sig draw                   # Preview-style trackpad signature
+omepreview edit document.pdf
+omepreview read document.pdf --json
+omepreview sig draw                   # trackpad light-touch; --click for mouse
 omepreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
+omepreview --version                  # omepreview 0.0.1
 ```
 
-Set `OMEPREVIEW_VIEWER=1` to force an external viewer instead of the built-in editor.
-
-## Editorial look
-
-- One desk tone from the active GTK theme (light or dark)
-- Paper sheet with folio line and soft shadow stack
-- Right overlay rail: transparent glyphs at 62% ink, ghost Save — not filled GTK pills
-- Omarchy mode by default (`OMAPDF_WINDOW_CONTROLS=0`); thin titlebar on other distros
-
-See [`docs/signature-trackpad.md`](docs/signature-trackpad.md) for trackpad signing behaviour on Linux.
+Desktop handler: `share/omepreview.desktop` · Application ID: `org.omepreview.Editor`
 
 ## For agents
 
-Every edit is a list of JSON ops (`highlight`, `place_signature`, `crop_pages`, …). The CLI, MCP server (`omepreview-mcp`), and editor all call the same engine.
+Every edit is a list of JSON ops. See [`docs/ops.md`](docs/ops.md).
 
 ```bash
 omepreview apply --ops edits.json -o out.pdf
-omepreview-mcp   # optional MCP extra
+omepreview-mcp
 ```
 
-Spec: [`docs/ops.md`](docs/ops.md)
+Trackpad signing notes: [`docs/signature-trackpad.md`](docs/signature-trackpad.md)
 
 ## License
 
-AGPL-3.0-or-later. Forked from [omapdf](https://github.com/pbergin11/omapdf); omepreview is its own product.
+[AGPL-3.0-or-later](LICENSE)
