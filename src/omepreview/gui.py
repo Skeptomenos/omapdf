@@ -2192,10 +2192,30 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             prev_b.set_sensitive(ed.page_no > 0)
             next_b.set_sensitive(ed.page_no < ed.page_count() - 1)
 
+        def paint_undo(ctx, fg):
+            _ink(ctx, fg, 1.6)
+            ctx.arc(10.0, 10.0, 5.0, 0.55, 3.9)
+            ctx.stroke()
+            ctx.move_to(4.6, 6.0)
+            ctx.line_to(4.2, 11.2)
+            ctx.line_to(8.6, 10.0)
+            ctx.stroke()
+
+        def paint_redo(ctx, fg):
+            _ink(ctx, fg, 1.6)
+            ctx.arc(8.0, 10.0, 5.0, -0.75, 2.6)
+            ctx.stroke()
+            ctx.move_to(13.4, 6.0)
+            ctx.line_to(13.8, 11.2)
+            ctx.line_to(9.4, 10.0)
+            ctx.stroke()
+
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("omapdf-ghost")
-        undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
-        redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
+        undo_b = Gtk.Button()
+        undo_b.set_child(icon_widget(paint_undo))
+        redo_b = Gtk.Button()
+        redo_b.set_child(icon_widget(paint_redo))
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
         redo_b.set_tooltip_text("Redo (Ctrl+Shift+Z)")
         for icon_b in (undo_b, redo_b):
