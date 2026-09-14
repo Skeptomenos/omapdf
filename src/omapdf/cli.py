@@ -127,6 +127,13 @@ def cmd_sign(args):
     _run_edit(args, [op])
 
 
+def cmd_delete_annotation(args):
+    _run_edit(
+        args,
+        [{"op": "delete_annotation", "page": args.page, "index": args.index}],
+    )
+
+
 def cmd_redact(args):
     op = {"op": "redact", "page": args.page}
     if args.match:
@@ -321,6 +328,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", action="store_true", help="stamp today's date below")
     _out_args(p)
     p.set_defaults(func=cmd_sign)
+
+    p = sub.add_parser(
+        "delete-annotation",
+        help="remove an annotation by page and 0-based index from omapdf read",
+    )
+    p.add_argument("pdf")
+    p.add_argument("--page", type=int, required=True)
+    p.add_argument("--index", type=int, required=True, help="0-based annotation index on the page")
+    _out_args(p)
+    p.set_defaults(func=cmd_delete_annotation)
 
     p = sub.add_parser("redact", help="permanently remove text or image pixels in a region")
     p.add_argument("pdf")

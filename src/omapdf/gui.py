@@ -350,7 +350,11 @@ class Editor:
                     x0, y0, x1, y1 = _norm_rect(it)
                     ops.append({"op": "redact", "page": page,
                                 "rect": [x0, y0, x1, y1], "fill": [0, 0, 0]})
-        return ops
+            elif it["kind"] == "field_fill":
+                ops.append({"op": "fill_field", "field": it["field"], "value": it["value"]})
+            elif it["kind"] == "delete_annot":
+                ops.append({"op": "delete_annotation", "page": page, "index": it["index"]})
+        return engine._order_ops(ops)
 
     # ---- geometry -------------------------------------------------------
 
@@ -366,6 +370,12 @@ class Editor:
             return _norm_rect(it)
         if it["kind"] == "redact":
             return _norm_rect(it)
+        if it["kind"] == "field_fill":
+            r = it["rect"]
+            return r[0], r[1], r[2], r[3]
+        if it["kind"] == "delete_annot":
+            r = it["rect"]
+            return r[0], r[1], r[2], r[3]
         xs = [p[0] for s in it["strokes"] for p in s]
         ys = [p[1] for s in it["strokes"] for p in s]
         return min(xs) - 4, min(ys) - 4, max(xs) + 4, max(ys) + 4
@@ -376,6 +386,46 @@ class Editor:
             if x0 - 4 <= x <= x1 + 4 and y0 - 4 <= y <= y1 + 4:
                 return it
         return None
+
+    def hit_widget(self, x, y):
+        """Return an empty AcroForm text widget at (x, y), if any."""
+        point = pymupdf.Point(x, y)
+        for widget in self.page().widgets():
+            if not widget.field_name or not widget.rect.contains(point):
+                continue
+            if widget.field_type != pymupdf.PDF_WIDGET_TYPE_TEXT:
+                continue
+            if (widget.field_value or "").strip():
+                continue
+            return widget
+        return None
+
+    def hit_saved_annot(self, x, y):
+        """Return the smallest saved annotation under (x, y), if any."""
+        best = None
+        for index, annot in enumerate(self.page().annots() or []):
+            if self._annot_marked_deleted(self.page_no, index):
+                continue
+            rect = annot.rect
+            pad = 4
+            if rect.x0 - pad <= x <= rect.x1 + pad and rect.y0 - pad <= y <= rect.y1 + pad:
+                area = max(1.0, rect.width * rect.height)
+                if best is None or area < best["area"]:
+                    best = {
+                        "kind": "saved_annot",
+                        "page": self.page_no,
+                        "index": index,
+                        "annot_type": annot.type[1],
+                        "rect": list(rect),
+                        "area": area,
+                    }
+        return best
+
+    def _annot_marked_deleted(self, page_no: int, index: int) -> bool:
+        for it in self.pending:
+            if it.get("kind") == "delete_annot" and it["page"] == page_no and it["index"] == index:
+                return True
+        return False
 
     def move_item(self, it, dx, dy):
         if it["kind"] in ("sig", "text", "note"):
@@ -461,6 +511,20 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             for it in ed.pending:
                 if it["page"] == ed.page_no:
                     draw_item(ctx, it)
+            if (
+                ed.selected
+                and ed.selected.get("kind") == "saved_annot"
+                and ed.selected["page"] == ed.page_no
+            ):
+                x0, y0, x1, y1 = ed.selected["rect"]
+                w, h = x1 - x0 + 8, y1 - y0 + 8
+                ctx.set_source_rgba(*SELECT_COLOR, 0.10)
+                ctx.rectangle(x0 - 4, y0 - 4, w, h)
+                ctx.fill()
+                ctx.set_source_rgba(*SELECT_COLOR, 0.95)
+                ctx.set_line_width(1.6)
+                ctx.rectangle(x0 - 4, y0 - 4, w, h)
+                ctx.stroke()
             if ed.live_stroke and len(ed.live_stroke) > 1:
                 _stroke_path(ctx, [ed.live_stroke], ed.pen_color, PEN_WIDTH)
             if ed.rubber:
@@ -540,9 +604,36 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ctx.set_line_width(1.2)
                 ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
                 ctx.stroke()
+            elif it["kind"] == "field_fill":
+                x0, y0, x1, y1 = ed.item_rect(it)
+                ctx.set_source_rgba(0.2, 0.45, 0.95, 0.12)
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.fill()
+                ctx.set_source_rgba(0.15, 0.45, 0.95, 0.9)
+                ctx.set_line_width(1.2)
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.stroke()
+                ctx.set_source_rgb(0.05, 0.05, 0.05)
+                ctx.select_font_face("sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                size = min(12.0, max(9.0, (y1 - y0) * 0.7))
+                ctx.set_font_size(size)
+                ctx.move_to(x0 + 3, y0 + size + 1)
+                ctx.show_text(it["value"])
+            elif it["kind"] == "delete_annot":
+                x0, y0, x1, y1 = ed.item_rect(it)
+                ctx.set_source_rgba(0.9, 0.15, 0.15, 0.22)
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.fill()
+                ctx.set_source_rgba(0.9, 0.15, 0.15, 0.9)
+                ctx.set_line_width(1.4)
+                ctx.set_dash([4, 3])
+                ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
+                ctx.stroke()
+                ctx.set_dash([])
             else:
                 _stroke_path(ctx, it["strokes"], it["color"], it["width"])
-            if it is ed.selected:
+            selected = ed.selected if ed.selected in ed.pending else None
+            if it is selected:
                 x0, y0, x1, y1 = ed.item_rect(it)
                 w, h = x1 - x0 + 8, y1 - y0 + 8
                 # Tinted fill + solid border + corner handles: unmistakable.
@@ -618,6 +709,25 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             prompt_entry(px, py, "Sticky note comment, then Enter", lambda t: {
                 "kind": "note", "page": ed.page_no, "x": px, "y": py, "text": t,
             })
+
+        def prompt_field_fill(widget, px, py):
+            name = widget.field_name
+
+            def commit(value):
+                ed.checkpoint()
+                item = {
+                    "kind": "field_fill",
+                    "page": ed.page_no,
+                    "field": name,
+                    "value": value,
+                    "rect": list(widget.rect),
+                }
+                ed.pending.append(item)
+                ed.selected = item
+                toast(f"Field {name!r} — not applied until Save")
+                return item
+
+            prompt_entry(px, py, f"Fill {name}, then Enter", commit)
 
         def edit_pending(item):
             """Re-open a pending note/text for editing, pre-filled."""
@@ -724,13 +834,23 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ed.tool == "cross":
                 add_stamp(CROSS, CROSS_COLOR, px, py)
             else:
-                ed.selected = hit_item
-                if ed.selected is None:
-                    try:
-                        show_saved_annot(px, py)
-                    except Exception as exc:
-                        toast(f"Couldn't open annotation: {exc}")
-                elif n_press >= 2 and ed.selected["kind"] in ("note", "text"):
+                if hit_item:
+                    ed.selected = hit_item
+                else:
+                    widget = ed.hit_widget(px, py)
+                    if widget is not None:
+                        prompt_field_fill(widget, px, py)
+                    else:
+                        saved = ed.hit_saved_annot(px, py)
+                        if saved:
+                            ed.selected = saved
+                        else:
+                            ed.selected = None
+                            try:
+                                show_saved_annot(px, py)
+                            except Exception as exc:
+                                toast(f"Couldn't open annotation: {exc}")
+                if ed.selected and ed.selected in ed.pending and n_press >= 2 and ed.selected["kind"] in ("note", "text"):
                     edit_pending(ed.selected)
             area.queue_draw()
             refresh_title()
@@ -772,10 +892,15 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ed.tool == "redact":
                 ed.rubber = (px, py, px, py)
             elif ed.tool == "select":
-                ed.selected = ed.hit(px, py)
-                if ed.selected:
+                hit_item = ed.hit(px, py)
+                if hit_item:
+                    ed.selected = hit_item
                     ed.checkpoint()
                     ed.drag_base = (0.0, 0.0)
+                else:
+                    saved = ed.hit_saved_annot(px, py)
+                    ed.selected = saved
+                    ed.drag_base = None
             area.queue_draw()
 
         def on_drag_update(_g, dx, dy):
@@ -786,7 +911,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ed.tool in ("highlight", "redact") and ed.rubber:
                 x0, y0, _, _ = ed.rubber
                 ed.rubber = (x0, y0, x0 + pdx, y0 + pdy)
-            elif ed.tool == "select" and ed.selected and ed.drag_base is not None:
+            elif (
+                ed.tool == "select"
+                and ed.selected in ed.pending
+                and ed.drag_base is not None
+            ):
                 lx, ly = ed.drag_base
                 ed.move_item(ed.selected, pdx - lx, pdy - ly)
                 ed.drag_base = (pdx, pdy)
@@ -1683,8 +1812,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 set_tool("redact")
             elif keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and ed.selected:
                 ed.checkpoint()
-                ed.pending.remove(ed.selected)
-                ed.selected = None
+                if ed.selected.get("kind") == "saved_annot":
+                    if not ed._annot_marked_deleted(ed.selected["page"], ed.selected["index"]):
+                        ed.pending.append({
+                            "kind": "delete_annot",
+                            "page": ed.selected["page"],
+                            "index": ed.selected["index"],
+                            "rect": ed.selected["rect"],
+                            "annot_type": ed.selected["annot_type"],
+                        })
+                    ed.selected = None
+                elif ed.selected in ed.pending:
+                    ed.pending.remove(ed.selected)
+                    ed.selected = None
             elif ctrl and keyval == Gdk.KEY_g:
                 page_btn.popup()
             elif keyval == Gdk.KEY_Page_Up:
@@ -1695,7 +1835,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 goto_page(0)
             elif keyval == Gdk.KEY_End:
                 goto_page(ed.page_count() - 1)
-            elif ed.selected and keyval in (Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Up, Gdk.KEY_Down):
+            elif (
+                ed.selected
+                and ed.selected.get("kind") not in ("saved_annot", "field_fill", "delete_annot")
+                and ed.selected in ed.pending
+                and keyval in (Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Up, Gdk.KEY_Down)
+            ):
                 dx = {Gdk.KEY_Left: -step, Gdk.KEY_Right: step}.get(keyval, 0.0)
                 dy = {Gdk.KEY_Up: -step, Gdk.KEY_Down: step}.get(keyval, 0.0)
                 ed.move_item(ed.selected, dx, dy)

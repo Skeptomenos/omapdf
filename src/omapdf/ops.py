@@ -36,6 +36,7 @@ OP_TYPES = (
     "insert_pages",
     "extract_pages",
     "redact",
+    "delete_annotation",
 )
 
 _ROTATE_DEGREES = (90, 180, 270, -90)
@@ -193,6 +194,13 @@ def validate(op: dict) -> dict:
         out["fill"] = [float(c) for c in fill]
         if "apply_now" in op:
             out["apply_now"] = bool(op["apply_now"])
+
+    elif kind == "delete_annotation":
+        _require(op, "page")
+        index = _require(op, "index")
+        if not (isinstance(index, int) and index >= 0):
+            raise OpError(f"index must be a non-negative integer, got {index!r}")
+        out["index"] = index
 
     if "page" in out:
         page = out["page"]

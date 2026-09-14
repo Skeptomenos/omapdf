@@ -127,11 +127,19 @@ verify fails, the whole batch fails.
 covers content visually but leaves the underlying text in `get_text()` /
 `pdftotext`. Only the `redact` op destroys content.
 
+### delete_annotation
+```json
+{"op": "delete_annotation", "page": 1, "index": 0}
+```
+Removes one annotation on `page` by 0-based `index` (listed in `omapdf read`
+under `annotations`). When deleting several on the same page in one batch,
+indices are applied high-to-low so they stay valid. Report adds `type` and
+`rect` of the removed annotation.
+
 ## Extending
 
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
 entry here + a test. Keep ops small and composable; a batch is the unit of
 atomicity.
 
-Planned: `stamp` (library images: APPROVED, initials), `delete_annotation`.
-See docs/roadmap.md.
+Planned: `stamp` (library images: APPROVED, initials). See docs/roadmap.md.
