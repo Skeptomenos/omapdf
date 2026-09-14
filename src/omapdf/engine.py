@@ -119,6 +119,33 @@ def _apply_ink(doc, op) -> dict:
     return {"rect": list(annot.rect)}
 
 
+def _apply_shape(doc, op) -> dict:
+    page = _page(doc, op["page"])
+    shape = op["shape"]
+    if shape in ("line", "arrow"):
+        p1 = pymupdf.Point(op["from"])
+        p2 = pymupdf.Point(op["to"])
+        annot = page.add_line_annot(p1, p2)
+        if shape == "arrow":
+            annot.set_line_ends(
+                pymupdf.PDF_ANNOT_LE_NONE,
+                pymupdf.PDF_ANNOT_LE_CLOSED_ARROW,
+            )
+        report = {"shape": shape, "from": op["from"], "to": op["to"]}
+    else:
+        rect = pymupdf.Rect(op["rect"])
+        if shape == "rect":
+            annot = page.add_rect_annot(rect)
+        else:
+            annot = page.add_circle_annot(rect)
+        report = {"shape": shape, "rect": list(rect)}
+    annot.set_colors(stroke=op["color"])
+    annot.set_border(width=op["width"])
+    annot.update()
+    report["rect"] = list(annot.rect)
+    return report
+
+
 def _validate_page_indices(doc: pymupdf.Document, pages: list[int], label: str = "page") -> None:
     for p in pages:
         if p < 1 or p > doc.page_count:
@@ -129,6 +156,44 @@ def _validate_page_indices(doc: pymupdf.Document, pages: list[int], label: str =
 
 def _normalize_rotation(degrees: int) -> int:
     return degrees % 360 if degrees >= 0 else (360 + degrees) % 360
+
+
+def _crop_rect_to_absolute(page: pymupdf.Page, rect: list[float]) -> pymupdf.Rect:
+    """Map a crop rect in current page (CropBox) space to absolute PDF coordinates."""
+    user = pymupdf.Rect(rect)
+    base = page.cropbox
+    abs_rect = pymupdf.Rect(
+        base.x0 + user.x0,
+        base.y0 + user.y0,
+        base.x0 + user.x1,
+        base.y0 + user.y1,
+    )
+    clipped = abs_rect & page.mediabox
+    if clipped.is_empty or clipped.width < 1 or clipped.height < 1:
+        raise OpError(
+            f"crop_pages rect {rect} is empty or outside the page mediabox "
+            f"(page size {page.rect.width:.0f}×{page.rect.height:.0f} pt)"
+        )
+    return clipped
+
+
+def _apply_crop_pages(doc, op) -> dict:
+    pages = op["pages"]
+    _validate_page_indices(doc, pages)
+    resolved: list[dict] = []
+    for p in pages:
+        page = doc[p - 1]
+        before = [page.rect.width, page.rect.height]
+        abs_rect = _crop_rect_to_absolute(page, op["rect"])
+        page.set_cropbox(abs_rect)
+        after = [page.rect.width, page.rect.height]
+        resolved.append({
+            "page": p,
+            "cropbox": list(abs_rect),
+            "size_before": before,
+            "size_after": after,
+        })
+    return {"pages": pages, "rect": op["rect"], "resolved": resolved}
 
 
 def _apply_rotate_pages(doc, op) -> dict:
@@ -251,6 +316,92 @@ def _apply_insert_pages(doc, op) -> dict:
         src_doc.close()
 
 
+def _text_in_rects(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> bool:
+    """True when extractable text still intersects any of the redaction rects."""
+    for block in page.get_text("blocks"):
+        if len(block) < 5:
+            continue
+        snippet = str(block[4]).strip()
+        if not snippet:
+            continue
+        br = pymupdf.Rect(block[:4])
+        for rect in rects:
+            if br.intersects(rect):
+                return True
+    return False
+
+
+def _verify_redact(page: pymupdf.Page, match: str | None, rects: list[pymupdf.Rect]) -> dict:
+    if match is not None:
+        still = match in page.get_text()
+    else:
+        still = _text_in_rects(page, rects)
+    return {"text_still_present": still}
+
+
+def _apply_delete_annotation(doc, op, *, dry_run: bool) -> dict:
+    page = _page(doc, op["page"])
+    annots = list(page.annots() or [])
+    index = op["index"]
+    if index >= len(annots):
+        raise OpError(
+            f"annotation index {index} out of range on page {op['page']} "
+            f"(page has {len(annots)} annotation(s); run `omapdf read` to list them)"
+        )
+    annot = annots[index]
+    result = {
+        "index": index,
+        "type": annot.type[1],
+        "rect": list(annot.rect),
+    }
+    if dry_run:
+        return result
+    page.delete_annot(annot)
+    return result
+
+
+def _apply_redact(doc, op, *, dry_run: bool) -> dict:
+    page = _page(doc, op["page"])
+    fill = tuple(op.get("fill", [0, 0, 0]))
+    apply_now = op.get("apply_now", True)
+
+    if "match" in op:
+        match = op["match"]
+        rects = page.search_for(match)
+        if not rects:
+            raise OpError(
+                f"text {match!r} not found on page {op['page']}; "
+                "run `omapdf read` to see the page's actual text"
+            )
+        verify_match = match
+    else:
+        rects = [pymupdf.Rect(op["rect"])]
+        verify_match = None
+
+    result = {"rects": [list(r) for r in rects]}
+
+    if dry_run:
+        return result
+
+    if not apply_now:
+        for rect in rects:
+            page.add_redact_annot(rect, fill=fill)
+        return result
+
+    for rect in rects:
+        page.add_redact_annot(rect, fill=fill)
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS)
+
+    verify = _verify_redact(page, verify_match, rects)
+    result["verify"] = verify
+    if verify["text_still_present"]:
+        raise OpError(
+            f"redact verify failed on page {op['page']}: text still present after "
+            "redaction — widen the region or check for overlapping content"
+        )
+    return result
+
+
 def _apply_extract_pages(doc, op, *, dry_run: bool) -> dict:
     pages = op["pages"]
     _validate_page_indices(doc, pages)
@@ -294,6 +445,8 @@ _APPLIERS = {
     "fill_field": _apply_fill_field,
     "place_signature": _apply_place_signature,
     "ink": _apply_ink,
+    "shape": _apply_shape,
+    "crop_pages": _apply_crop_pages,
     "rotate_pages": _apply_rotate_pages,
     "delete_pages": _apply_delete_pages,
     "move_pages": _apply_move_pages,
@@ -319,6 +472,16 @@ def _save(doc: pymupdf.Document, source: Path, output: Path) -> None:
         doc.close()
 
 
+def _order_ops(ops: list[dict]) -> list[dict]:
+    """Delete annotations high-to-low per page so indices stay valid in a batch."""
+    deletes = [op for op in ops if op["op"] == "delete_annotation"]
+    if not deletes or len(deletes) == 1:
+        return ops
+    rest = [op for op in ops if op["op"] != "delete_annotation"]
+    deletes.sort(key=lambda op: (op["page"], op["index"]), reverse=True)
+    return rest + deletes
+
+
 def apply(
     pdf: str | Path,
     op_list: list[dict],
@@ -334,7 +497,7 @@ def apply(
     pdf = Path(pdf)
     if not pdf.is_file():
         raise FileNotFoundError(f"no such PDF: {pdf}")
-    validated = ops_mod.validate_all(op_list)
+    validated = _order_ops(ops_mod.validate_all(op_list))
     output = Path(output) if output else pdf
 
     doc = pymupdf.open(str(pdf))
@@ -346,6 +509,10 @@ def apply(
         for op in validated:
             if op["op"] == "extract_pages":
                 resolution = _apply_extract_pages(doc, op, dry_run=dry_run)
+            elif op["op"] == "redact":
+                resolution = _apply_redact(doc, op, dry_run=dry_run)
+            elif op["op"] == "delete_annotation":
+                resolution = _apply_delete_annotation(doc, op, dry_run=dry_run)
             else:
                 resolution = _APPLIERS[op["op"]](doc, op)
             applied.append({**op, **resolution, "applied": not dry_run})

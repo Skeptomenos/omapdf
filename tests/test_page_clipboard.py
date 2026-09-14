@@ -1,0 +1,65 @@
+"""Tests for cross-window page clipboard serialization."""
+
+import base64
+import json
+
+import pymupdf
+
+from omapdf.page_clipboard import (
+    MIME_OMAPDF_PAGES,
+    pdf_bytes_from_clipboard_text,
+    push_clipboard,
+    read_clipboard_pdf_bytes,
+    serialize_pages,
+    write_pages_to_file,
+)
+from tests.data.make_docs import make_labeled_pdf
+
+
+def test_serialize_and_parse_roundtrip(tmp_path):
+    pdf = make_labeled_pdf(tmp_path / "doc.pdf", page_count=4)
+    doc = pymupdf.open(str(pdf))
+    json_bytes, pdf_bytes = serialize_pages(doc, [2, 3])
+    doc.close()
+    payload = json.loads(json_bytes.decode())
+    assert payload["n"] == 2
+    assert pdf_bytes_from_clipboard_text(json.dumps(payload)) == pdf_bytes
+    out = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    assert out.page_count == 2
+    out.close()
+
+
+def test_extract_pages_to_file(tmp_path):
+    pdf = make_labeled_pdf(tmp_path / "doc.pdf", page_count=5)
+    doc = pymupdf.open(str(pdf))
+    dest = tmp_path / "excerpt.pdf"
+    write_pages_to_file(doc, [1, 5], dest)
+    doc.close()
+    out = pymupdf.open(str(dest))
+    assert out.page_count == 2
+    assert "PAGE 1" in out[0].get_text()
+    assert "PAGE 5" in out[1].get_text()
+    out.close()
+
+
+def test_gtk_clipboard_roundtrip():
+    import gi
+
+    gi.require_version("Gdk", "4.0")
+    from gi.repository import Gdk, GLib
+
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    doc = pymupdf.open()
+    doc.new_page()
+    doc[0].insert_text((72, 72), "clip test")
+    json_bytes, pdf_bytes = serialize_pages(doc, [1])
+    doc.close()
+    push_clipboard(json_bytes, pdf_bytes)
+    got = read_clipboard_pdf_bytes()
+    assert got is not None
+    out = pymupdf.open(stream=got, filetype="pdf")
+    assert out.page_count == 1
+    assert "clip test" in out[0].get_text()
+    out.close()

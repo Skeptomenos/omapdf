@@ -5,7 +5,8 @@
 **v0.1 — the agent-native core**
 - [x] Op engine: highlight/underline/strikeout/squiggly, notes, text boxes,
   form filling, signature placement with date stamp, freehand ink
-- [x] Structured read: text blocks + bboxes, form fields, annotations
+- [x] Structured read: text blocks + bboxes, form fields, annotations (with
+  0-based `index` for delete)
 - [x] CLI with `--json`/`--dry-run` everywhere; atomic `apply` batches
 - [x] MCP server (`omapdf-mcp`) with confirm-before-signing posture
 - [x] Signature store + `sig draw` GTK drawing window
@@ -19,7 +20,7 @@
 **v0.2/v0.3 — the editor** (arrived early, in GTK4 rather than Qt)
 - [x] `omapdf edit`: page view, hand-drawn vector icon toolbar, pill styling
 - [x] Tools: select/drag, pen + tap-again color palette, highlighter, text,
-  sticky notes, signature, check/cross stamps
+  sticky notes, signature, check/cross stamps, **redact** (R)
 - [x] Ghost model with undo/redo **across the save boundary** (a save is an
   undoable step; undoing it resurrects the items as editable ghosts)
 - [x] `--ops` proposals load as draggable ghosts (agent proposes, human
@@ -33,13 +34,32 @@
   watcher that reloads the view when the agent saves changes
 - [x] Default-PDF-handler desktop file (`omapdf open` → the editor)
 
+**Preview parity — page surgery (M1)**
+- [x] Page ops: `rotate_pages`, `delete_pages`, `move_pages`, `insert_pages`,
+  `extract_pages` — engine, CLI (`omapdf pages`), MCP, tests
+- [x] GTK thumbnail sidebar: multi-select, drag reorder, delete/rotate
+  shortcuts, context menu, file-drop insert, extract dialog, scratch preview
+- [x] Two-window page clipboard (`application/x-omapdf-pages` + PDF fallback);
+  Ctrl+C/V/X when sidebar focused
+
+**Preview parity — safe share (M2)**
+- [x] True `redact` op (text + image pixels removed, verify hook)
+- [x] CLI `omapdf redact`, MCP `redact` (dry-run default)
+- [x] GTK redact tool: text-snap and free-rectangle modes; ghosts until Save;
+  default `*_redacted.pdf` save-as-copy
+- [x] Documented: **pen/ink is not redact**
+
+**Preview parity — daily driver (M3)**
+- [x] GUI form field hit-test → `fill_field` on Save
+- [x] `delete_annotation` op + Delete on selected saved markup
+- [x] CLI `omapdf delete-annotation`, MCP `delete_annotation` (dry-run default)
+- [x] Manual checklist: [docs/preview-parity.md](preview-parity.md)
+
 ## Next
 
 - **`omapdf sign --auto`** — signature-line detection: "Signature:"/"Sign
   here" labels, ruled lines, signature-type fields → ranked placement
   proposals; agents and the editor both consume them as ghosts
-- **Edit saved annotations** — select/move/delete existing annotations in
-  the editor (a `delete_annotation` op first; move = delete + recreate)
 - **Comments summary page** — append a final page listing every comment
   with its page number, for recipients with weak viewers or paper
 - **Stamp library** — APPROVED / DRAFT / PAID / initials as a `stamp` op
@@ -54,12 +74,14 @@
 - **Cryptographic signing (v0.4)** — PAdES via pyHanko as an optional
   extra: certificates, visible + cryptographic signature in one op,
   `omapdf verify`. Kept clearly distinct from visual signing in the UX.
-- **Redaction** — true content removal (not black boxes), with the
-  loud warnings that feature demands
+- **P2 editor ops** — shapes (line, arrow, rect, oval), crop page,
+  encrypt/permissions on save-as, outline sidebar, two-page view,
+  paranoid raster redact mode, print action
 
 ## Distribution
 
 1. GitHub (repo URL placeholder: omapdf/omapdf), AUR package
-   (`packaging/PKGBUILD`)
+   (`packaging/PKGBUILD`) — see [packaging/SMOKE-aarch64.md](../packaging/SMOKE-aarch64.md)
+   for aarch64/Omarchy smoke steps
 2. Omarchy plugin listing for the bar widget
 3. Pitch to the omarchy package repo once polished (the omasnap path)

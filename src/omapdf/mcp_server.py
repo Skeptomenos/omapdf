@@ -222,6 +222,112 @@ def extract_pages(
 
 
 @mcp.tool()
+def delete_annotation(
+    path: str,
+    page: int,
+    index: int,
+    output: str | None = None,
+    confirm: bool = False,
+) -> dict:
+    """Delete one annotation on `page` by 0-based `index` (see omapdf read).
+
+    Defaults to dry-run — pass confirm=true after the user approves."""
+    result = engine.apply(
+        path,
+        [{"op": "delete_annotation", "page": page, "index": index}],
+        output=output,
+        dry_run=not confirm,
+    )
+    if not confirm:
+        result["needs_confirmation"] = (
+            "Dry run only. Re-call with confirm=true after the user approves."
+        )
+    return result
+
+
+@mcp.tool()
+def redact(
+    path: str,
+    page: int,
+    match: str | None = None,
+    rect: list[float] | None = None,
+    fill: list[float] | None = None,
+    output: str | None = None,
+    confirm: bool = False,
+) -> dict:
+    """Permanently remove text or image pixels in a region on `page`.
+
+    Provide exactly one of `match` (text search) or `rect` ([x0,y0,x1,y1]).
+    Defaults to dry-run — pass confirm=true after the user approves."""
+    op: dict = {"op": "redact", "page": page}
+    if match:
+        op["match"] = match
+    elif rect:
+        op["rect"] = rect
+    else:
+        raise ValueError("redact needs match or rect")
+    if fill:
+        op["fill"] = fill
+    result = engine.apply(path, [op], output=output, dry_run=not confirm)
+    if not confirm:
+        result["needs_confirmation"] = (
+            "Dry run only. Re-call with confirm=true after the user approves."
+        )
+    return result
+
+
+@mcp.tool()
+def crop_pages(
+    path: str,
+    pages: list[int],
+    rect: list[float],
+    output: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Set the PDF CropBox for ``pages`` to ``rect`` ([x0, y0, x1, y1] in the
+    page's current coordinate space, top-left origin). Does not trim content —
+    it changes the visible page box."""
+    return engine.apply(
+        path,
+        [{"op": "crop_pages", "pages": pages, "rect": rect}],
+        output=output,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
+def add_shape(
+    path: str,
+    page: int,
+    shape: str,
+    from_point: list[float] | None = None,
+    to_point: list[float] | None = None,
+    rect: list[float] | None = None,
+    color: list[float] | None = None,
+    width: float = 2.0,
+    output: str | None = None,
+) -> dict:
+    """Add a Line, Square, or Circle PDF annotation on `page`.
+
+    `shape` is one of line, arrow, rect, oval. Line and arrow need
+    `from_point` and `to_point` ([x, y]); rect and oval need `rect`
+    ([x0, y0, x1, y1]). Coordinates are PDF points, top-left origin."""
+    op: dict = {"op": "shape", "page": page, "shape": shape, "width": width}
+    if shape in ("line", "arrow"):
+        if not from_point or not to_point:
+            raise ValueError("line and arrow need from_point and to_point")
+        op["from"] = from_point
+        op["to"] = to_point
+    elif rect:
+        op["rect"] = rect
+    else:
+        raise ValueError("rect and oval need rect")
+    if color:
+        op["color"] = color
+    return engine.apply(path, [op], output=output)
+
+
+@mcp.tool()
 def flatten_pdf(path: str, output: str | None = None) -> dict:
     """Bake all annotations and form fields into page content (irreversible
     in the output file; the input is preserved when `output` is given)."""

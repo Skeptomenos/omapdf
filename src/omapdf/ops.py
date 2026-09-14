@@ -22,6 +22,7 @@ points (1/72 inch) with the origin at the TOP-LEFT of the page, matching what
 from __future__ import annotations
 
 MARKUP_STYLES = ("highlight", "underline", "strikeout", "squiggly")
+SHAPE_TYPES = ("line", "arrow", "rect", "oval")
 
 OP_TYPES = (
     "highlight",
@@ -35,6 +36,10 @@ OP_TYPES = (
     "move_pages",
     "insert_pages",
     "extract_pages",
+    "redact",
+    "delete_annotation",
+    "shape",
+    "crop_pages",
 )
 
 _ROTATE_DEGREES = (90, 180, 270, -90)
@@ -179,6 +184,52 @@ def validate(op: dict) -> dict:
     elif kind == "extract_pages":
         out["pages"] = _page_list(_require(op, "pages"))
         out["to"] = str(_require(op, "to"))
+
+    elif kind == "redact":
+        _require(op, "page")
+        if ("match" in op) == ("rect" in op):
+            raise OpError("redact needs exactly one of 'match' or 'rect'")
+        if "rect" in op:
+            out["rect"] = _rect(op["rect"])
+        fill = op.get("fill", [0, 0, 0])
+        if not (isinstance(fill, (list, tuple)) and len(fill) == 3):
+            raise OpError(f"fill must be [r, g, b] in 0..1, got {fill!r}")
+        out["fill"] = [float(c) for c in fill]
+        if "apply_now" in op:
+            out["apply_now"] = bool(op["apply_now"])
+
+    elif kind == "delete_annotation":
+        _require(op, "page")
+        index = _require(op, "index")
+        if not (isinstance(index, int) and index >= 0):
+            raise OpError(f"index must be a non-negative integer, got {index!r}")
+        out["index"] = index
+
+    elif kind == "crop_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+        out["rect"] = _rect(_require(op, "rect"))
+        x0, y0, x1, y1 = out["rect"]
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            raise OpError("crop_pages rect must have positive width and height")
+
+    elif kind == "shape":
+        _require(op, "page")
+        shape = _require(op, "shape")
+        if shape not in SHAPE_TYPES:
+            raise OpError(
+                f"unknown shape {shape!r}; valid shapes: {', '.join(SHAPE_TYPES)}"
+            )
+        out["shape"] = shape
+        if shape in ("line", "arrow"):
+            out["from"] = _point(_require(op, "from"))
+            out["to"] = _point(_require(op, "to"))
+        else:
+            out["rect"] = _rect(_require(op, "rect"))
+        color = op.get("color", [0, 0, 0])
+        if not (isinstance(color, (list, tuple)) and len(color) == 3):
+            raise OpError(f"color must be [r, g, b] in 0..1, got {color!r}")
+        out["color"] = [float(c) for c in color]
+        out["width"] = float(op.get("width", 2))
 
     if "page" in out:
         page = out["page"]

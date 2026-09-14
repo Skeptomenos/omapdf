@@ -6,7 +6,7 @@ pkgdesc="Agent-native PDF annotation and signing for Linux"
 arch=('any')
 url="https://github.com/pbergin11/omapdf"
 license=('AGPL-3.0-or-later')
-depends=('python' 'python-pymupdf')
+depends=('python' 'python-pymupdf' 'gtk4' 'python-gobject' 'python-cairo')
 optdepends=(
   'python-mcp: MCP server for AI agents (omapdf-mcp)'
   'omarchy: bar widget and menu-based PDF picker'

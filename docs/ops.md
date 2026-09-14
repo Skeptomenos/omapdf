@@ -5,6 +5,24 @@ project's stable contract: the CLI, MCP server, and GUI are all clients of it,
 and third-party tools are welcome to speak it directly (`omapdf apply doc.pdf
 --ops ops.json`).
 
+## CLI and MCP
+
+Each op is available through `omapdf apply --ops file.json` and MCP
+`apply_ops`. Convenience wrappers:
+
+| Op | CLI | MCP |
+|----|-----|-----|
+| Page list | `omapdf pages FILE --list` | `list_pages` |
+| Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`, `crop_pages` |
+| Crop page | `omapdf crop FILE --page N --rect …` | `crop_pages` |
+| Redact | `omapdf redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
+| Delete annot | `omapdf delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
+| Markup / forms | `annotate`, `note`, `fill`, `sign`, `shape` | `highlight`, `add_note`, `fill_field`, `place_signature`, `add_shape` |
+
+Destructive MCP tools (`place_signature`, `delete_pages`, `redact`,
+`delete_annotation`) default to dry-run; pass `confirm=true` (or
+`confirmed=true` for signatures) after human approval.
+
 ## Conventions
 
 - **Pages are 1-based** everywhere a human or agent sees them.
@@ -71,6 +89,29 @@ Freehand strokes as a real Ink annotation. `strokes` is a list of polylines
 `width` in points (default 2). Powers the editor's pen and its ✓/✕ stamps.
 Report adds the bounding `rect`.
 
+### shape
+```json
+{"op": "shape", "page": 1, "shape": "line", "from": [72, 100], "to": [300, 200]}
+{"op": "shape", "page": 1, "shape": "arrow", "from": [72, 100], "to": [300, 200]}
+{"op": "shape", "page": 1, "shape": "rect", "rect": [80, 80, 220, 160]}
+{"op": "shape", "page": 1, "shape": "oval", "rect": [80, 80, 220, 160],
+ "color": [0.1, 0.35, 0.85], "width": 2}
+```
+Vector shape annotations (Preview-class markup). `shape` is one of `line`,
+`arrow`, `rect`, `oval`. Line and arrow need `from` and `to` points; rect and
+oval need `rect`. Renders as PDF Line, Square, or Circle annotations.
+`color` defaults to black; `width` defaults to 2pt. Report adds `rect` (bbox).
+
+### crop_pages
+```json
+{"op": "crop_pages", "pages": [1], "rect": [72, 80, 500, 750]}
+```
+Sets the PDF **CropBox** for each listed page — the visible page region in
+current page coordinates (top-left origin, same space as `omapdf read` rects).
+Does not auto-trim content to ink bounds; repeated crops stack in page space.
+Report: `{ "pages": [...], "rect": [...], "resolved": [{ "page", "cropbox",
+"size_before", "size_after" }, ...] }`.
+
 ### rotate_pages
 ```json
 {"op": "rotate_pages", "pages": [2, 3], "degrees": 90}
@@ -111,11 +152,40 @@ pixels. Report includes `inserted` and which variant was used.
 Writes selected pages to `to`. Does not modify the source document. Report:
 `{ "pages": [...], "to": "excerpt.pdf" }`.
 
+### redact
+```json
+{"op": "redact", "page": 1, "match": "Jane Doe"}
+{"op": "redact", "page": 1, "rect": [72, 400, 300, 430], "fill": [0, 0, 0]}
+```
+Exactly one of `match` (every occurrence on the page) or `rect`. On apply,
+PyMuPDF `add_redact_annot` + `apply_redactions()` removes matched text and
+intersecting image samples, then fills the region opaque (default black).
+`apply_now: false` adds redaction annotations as editable ghosts until a later
+apply. Report adds `rects` and `verify: { "text_still_present": false }`; if
+verify fails, the whole batch fails.
+
+**Pen / ink is not redact.** Drawing a black ink stroke or rectangle overlay
+covers content visually but leaves the underlying text in `get_text()` /
+`pdftotext`. Only the `redact` op destroys content.
+
+### delete_annotation
+```json
+{"op": "delete_annotation", "page": 1, "index": 0}
+```
+Removes one annotation on `page` by 0-based `index` (listed in `omapdf read`
+under `annotations`). When deleting several on the same page in one batch,
+indices are applied high-to-low so they stay valid. Report adds `type` and
+`rect` of the removed annotation.
+
 ## Extending
 
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
 entry here + a test. Keep ops small and composable; a batch is the unit of
 atomicity.
 
-Planned: `stamp` (library images: APPROVED, initials), `delete_annotation`,
-`redact`. See docs/roadmap.md.
+## Related docs
+
+- [preview-parity.md](preview-parity.md) — manual acceptance checklist
+- [roadmap.md](roadmap.md) — shipped vs next vs P2
+
+Planned: `stamp` (library images: APPROVED, initials). See docs/roadmap.md.
