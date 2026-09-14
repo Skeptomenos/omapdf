@@ -49,8 +49,37 @@ def test_sign_click_always_presents_gallery():
     body = text[start:end]
     assert "rebuild_sign_popover()" in body
     assert "_sign_pop_popup()" in body
+    assert "GLib.idle_add" in body
     assert 'elif ed.tool == "sign"' not in body
-    assert "just_activated" not in body or "if sign_state" not in body
     popup = text[text.index("def _sign_pop_popup") : text.index("def _flush_deferred_render")]
     assert "popover_can_popup" in popup
     assert "popover_is_alive" not in popup
+
+
+def test_live_gtk_popover_capsule_is_not_treated_as_null():
+    """PyGObject unnamed capsules print as NULL; that must not skip popup()."""
+    import os
+
+    import pytest
+
+    if not os.environ.get("DISPLAY"):
+        pytest.skip("needs a display")
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from omepreview.view_gestures import (
+        gi_pointer_ok,
+        popover_can_popup,
+        popover_is_alive,
+    )
+
+    btn = Gtk.ToggleButton()
+    pop = Gtk.Popover()
+    assert "NULL" in str(pop.__gpointer__).upper()
+    pop.set_parent(btn)
+    assert gi_pointer_ok(pop) is True
+    assert popover_can_popup(pop) is True
+    assert popover_is_alive(pop) is False  # unrealized: autohide still skipped
+

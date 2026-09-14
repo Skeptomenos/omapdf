@@ -139,12 +139,34 @@ def compute_pinch_focus(gesture, scroller, area) -> tuple[float, tuple[float, fl
     )
 
 
+def _capsule_address(capsule) -> int | None:
+    """C pointer stored in a PyCapsule, or None if unreadable.
+
+    PyGObject unnamed capsules stringify as ``<capsule object NULL at 0x…>``.
+    That ``NULL`` is the capsule *name*, not a NULL GObject. Using
+    ``"NULL" in str(capsule)`` made every live popover look dead, so Sign
+    never called ``popup()``.
+    """
+    try:
+        import ctypes
+
+        getter = ctypes.pythonapi.PyCapsule_GetPointer
+        getter.restype = ctypes.c_void_p
+        getter.argtypes = [ctypes.py_object, ctypes.c_char_p]
+        addr = getter(capsule, None)
+    except Exception:
+        return None
+    if addr is None:
+        return 0
+    return int(addr)
+
+
 def gi_pointer_ok(widget) -> bool:
     """True if a PyGObject wrapper still holds a non-NULL C pointer.
 
-    A destroyed Gtk widget keeps a Python wrapper whose ``__gpointer__``
-    capsule prints as ``NULL``. Calling GTK methods on it SIGSEGVs.
-    Objects without ``__gpointer__`` are treated as duck-typed test doubles.
+    A destroyed Gtk widget keeps a Python wrapper whose instance pointer is
+    0. Calling GTK methods on that SIGSEGVs. Duck-typed test doubles without
+    ``__gpointer__`` are treated as live.
     """
     if widget is None:
         return False
@@ -153,9 +175,13 @@ def gi_pointer_ok(widget) -> bool:
     ptr = widget.__gpointer__
     if ptr is None:
         return False
-    if "NULL" in str(ptr).upper():
-        return False
-    return True
+    if isinstance(ptr, (str, bytes)):
+        text = ptr.decode() if isinstance(ptr, bytes) else ptr
+        return "NULL" not in text.upper()
+    addr = _capsule_address(ptr)
+    if addr is None:
+        return True
+    return addr != 0
 
 
 def popover_is_alive(widget) -> bool:
