@@ -7,8 +7,8 @@ import sys
 import pymupdf
 import pytest
 
-from omapreview import engine, read, signature
-from omapreview.ops import OpError
+from omepreview import engine, read, signature
+from omepreview.ops import OpError
 
 
 @pytest.fixture()
@@ -69,7 +69,7 @@ def test_highlight_by_match(sample_pdf, tmp_path):
 
 
 def test_highlight_missing_text_fails_actionably(sample_pdf):
-    with pytest.raises(OpError, match="omapreview read"):
+    with pytest.raises(OpError, match="omepreview read"):
         engine.apply(sample_pdf, [{"op": "highlight", "page": 1, "match": "no such words"}])
 
 
@@ -126,7 +126,7 @@ def test_cli_end_to_end(sample_pdf, sig_home, tmp_path):
     out = tmp_path / "cli.pdf"
     run = subprocess.run(
         [
-            sys.executable, "-m", "omapreview.cli", "annotate", str(sample_pdf),
+            sys.executable, "-m", "omepreview.cli", "annotate", str(sample_pdf),
             "--page", "1", "--match", "Rent is due", "--style", "underline",
             "-o", str(out), "--json",
         ],
@@ -151,7 +151,7 @@ def test_ink_op(sample_pdf, tmp_path):
 
 
 def test_snapshot_with_grid(sample_pdf, tmp_path):
-    from omapreview import render
+    from omepreview import render
 
     out = tmp_path / "page.png"
     result = render.snapshot(sample_pdf, page=1, output=out, grid=50)

@@ -1,8 +1,8 @@
-# macOS Preview vs omapreview — Research and Gap Analysis
+# macOS Preview vs omepreview — Research and Gap Analysis
 
 **Date:** 2026-09-13  
 **Scope:** PDF features only (Preview also edits images; that is out of scope).  
-**Sources:** Apple Preview documentation and common Preview workflows; omapreview README, `docs/ops.md`, `docs/roadmap.md` (pbergin11/omapdf, AGPL-3.0-or-later).
+**Sources:** Apple Preview documentation and common Preview workflows; omepreview README, `docs/ops.md`, `docs/roadmap.md` (pbergin11/omapdf, AGPL-3.0-or-later).
 
 ---
 
@@ -18,7 +18,7 @@ The UX people miss on Linux is not “more annotation types.” It is:
 4. Markup, sign, and redact live in the same window.
 5. Save is one step. No “export as PDF” ritual.
 
-omapreview already markets itself as “Preview.app for Linux.” The editor, agent loop, and annotation engine are ahead of Preview. Page surgery is not.
+omepreview already markets itself as “Preview.app for Linux.” The editor, agent loop, and annotation engine are ahead of Preview. Page surgery is not.
 
 ---
 
@@ -127,9 +127,9 @@ On Omarchy / Hyprland, Super is the compositor modifier. Page copy should be **C
 
 ---
 
-## 3. omapreview — current feature inventory
+## 3. omepreview — current feature inventory
 
-omapreview is an agent-native Linux PDF tool: GTK4 editor, CLI, MCP server, Omarchy bar plugin. One JSON op engine (PyMuPDF) drives GUI, CLI, and agents.
+omepreview is an agent-native Linux PDF tool: GTK4 editor, CLI, MCP server, Omarchy bar plugin. One JSON op engine (PyMuPDF) drives GUI, CLI, and agents.
 
 License: AGPL-3.0-or-later.
 
@@ -143,7 +143,7 @@ License: AGPL-3.0-or-later.
 | Search | Ctrl+F, cycle matches. |
 | Tools | Select/drag, pen + tap-again color palette, highlighter, text, sticky notes, signature placement, green-check / red-cross stamps. |
 | Ghost model | Pending ops are overlays. Nudge before save. Undo crosses the save boundary. |
-| Agent ghosts | `omapreview edit doc.pdf --ops proposal.json` loads dry-run ops as draggable overlays. |
+| Agent ghosts | `omepreview edit doc.pdf --ops proposal.json` loads dry-run ops as draggable overlays. |
 | Ask agent | ✦ opens Omarchy default agent with the file; editor watches disk and reloads. |
 | Comments | Click saved annotation (ours or others’) to read it. |
 | Share | Email attach, LocalSend, copy file/zip to clipboard, show in folder, flatten-copy-first. |
@@ -169,11 +169,11 @@ CLI: `edit`, `read` (text + bboxes + fields + annots), `fields`, `annotate`, `no
 
 MCP: `read_pdf`, `list_form_fields`, `apply_ops`, `highlight`, `add_note`, `fill_field`, `place_signature` (dry-run default), `list_signatures`, `flatten_pdf`.
 
-Omarchy: `omapreview`.bar` recent-PDFs pill; desktop file as default PDF handler.
+Omarchy: `omepreview`.bar` recent-PDFs pill; desktop file as default PDF handler.
 
 ### 3.4 Roadmap (already written by upstream)
 
-**Next:** `sign --auto`, edit/delete saved annotations, comments summary page, stamp library, `omapreview diff`, toolbar overflow, selection → agent context.
+**Next:** `sign --auto`, edit/delete saved annotations, comments summary page, stamp library, `omepreview diff`, toolbar overflow, selection → agent context.
 
 **Later:** PAdES via pyHanko; **true redaction** with loud warnings.
 
@@ -183,11 +183,11 @@ Omarchy: `omapreview`.bar` recent-PDFs pill; desktop file as default PDF handler
 
 ## 4. Gap analysis
 
-Legend: **Have** = omapreview today. **Partial** = exists but weaker or different. **Missing** = Preview-class capability absent. **Beyond** = omapreview is ahead of Preview.
+Legend: **Have** = omepreview today. **Partial** = exists but weaker or different. **Missing** = Preview-class capability absent. **Beyond** = omepreview is ahead of Preview.
 
-### 4.1 Where omapreview is ahead of Preview
+### 4.1 Where omepreview is ahead of Preview
 
-| Capability | Why omapreview wins |
+| Capability | Why omepreview wins |
 |---|---|
 | Agent / MCP / CLI | Preview has none. |
 | Structured `read` with bboxes | Agents can target text. |
@@ -201,7 +201,7 @@ Do not sacrifice these to imitate Preview.
 
 ### 4.2 Parity matrix (PDF only)
 
-| Capability | Preview | omapreview | Gap |
+| Capability | Preview | omepreview | Gap |
 |---|---|---|---|
 | Thumbnail sidebar | Yes, interactive | Yes, F9, view-only | **Partial** |
 | Contact sheet | Yes | No | Missing (low priority) |
@@ -232,13 +232,13 @@ Do not sacrifice these to imitate Preview.
 | Password / permissions | Export options | No | Missing — P2 |
 | Crop page | Yes | No | Missing — P2 |
 | Print | Yes | Via system? | Confirm — P2 |
-| Autosave | Yes | Explicit save + ghosts | Different by design — keep omapreview model |
+| Autosave | Yes | Explicit save + ghosts | Different by design — keep omepreview model |
 
 ### 4.3 Priority gaps (what “Preview parity” actually means)
 
 **P0 — page handling + redaction**
 
-Without these, omapreview is a great annotator, not Preview.
+Without these, omepreview is a great annotator, not Preview.
 
 1. Page model in the sidebar: select, multi-select, reorder, delete, rotate.
 2. Cross-document page clipboard + drag (two editor windows).
@@ -268,16 +268,16 @@ Without these, omapreview is a great annotator, not Preview.
 ### 4.4 Design constraints (do not copy Preview blindly)
 
 1. **Keep the op engine as the source of truth.** Every page mutation must be an op (`delete_pages`, `move_pages`, `rotate_pages`, `insert_pages`, `redact`) so CLI and agents get the same power as the GUI.
-2. **Keep ghosts + explicit save.** Preview’s autosave is why Apple says “duplicate before redact.” omapreview should preview redactions as ghosts and commit on Save.
-3. **Do not merge Xournal++ or PDF Arranger source.** Different engines (Poppler / pikepdf). Reimplement page ops on PyMuPDF, which omapreview and Censor already use.
-4. **License.** omapreview is AGPL-3.0-or-later. Page-op ideas from PDF Arranger (GPL-3) and redaction ideas from Censor (GPL-3-or-later) are license-compatible if you copy code; prefer reimplementation + citation to keep provenance clean.
+2. **Keep ghosts + explicit save.** Preview’s autosave is why Apple says “duplicate before redact.” omepreview should preview redactions as ghosts and commit on Save.
+3. **Do not merge Xournal++ or PDF Arranger source.** Different engines (Poppler / pikepdf). Reimplement page ops on PyMuPDF, which omepreview and Censor already use.
+4. **License.** omepreview is AGPL-3.0-or-later. Page-op ideas from PDF Arranger (GPL-3) and redaction ideas from Censor (GPL-3-or-later) are license-compatible if you copy code; prefer reimplementation + citation to keep provenance clean.
 5. **Architecture.** User machine is aarch64 Omarchy. Stay Python + GTK4 + PyMuPDF. No x86-only deps.
 
 ### 4.5 Suggested success test (human)
 
 A user can:
 
-1. Open `a.pdf` and `b.pdf` in two omapreview windows.
+1. Open `a.pdf` and `b.pdf` in two omepreview windows.
 2. Show thumbnails (F9).
 3. Multi-select three pages in A, Ctrl+C, click between pages in B, Ctrl+V.
 4. Select a sideways page, rotate 90°.
@@ -293,9 +293,9 @@ If that loop works, Preview parity for the requested scope is done.
 
 ## 5. References
 
-- omapreview repository: https://github.com/pbergin11/omapreview
-- omapreview ops: `docs/ops.md`
-- omapreview roadmap: `docs/roadmap.md`
+- omepreview repository: https://github.com/pbergin11/omepreview
+- omepreview ops: `docs/ops.md`
+- omepreview roadmap: `docs/roadmap.md`
 - Apple: View PDFs in Preview — https://support.apple.com/guide/preview/view-pdfs-and-images-prvw11470/mac
 - Apple: Annotate a PDF in Preview — https://support.apple.com/guide/preview/annotate-a-pdf-prvw11580/mac
 - Common Preview page workflows: thumbnails, Delete, drag between windows, Cmd+L / Cmd+R, Redact Selection

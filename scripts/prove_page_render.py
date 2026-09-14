@@ -55,7 +55,7 @@ import subprocess, time, sys
 from pathlib import Path
 pdf = "{pdf}"
 shot = "{shot}"
-subprocess.Popen([sys.executable, "-m", "omapreview.cli", "edit", pdf])
+subprocess.Popen([sys.executable, "-m", "omepreview.cli", "edit", pdf])
 time.sleep(4)
 try:
     subprocess.run(["scrot", "-f", shot], check=True, timeout=10)

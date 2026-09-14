@@ -1,14 +1,14 @@
 # Maintainer: Peter Bergin
-pkgname=omapreview
-pkgver=0.1.0
+pkgname=omepreview
+pkgver=0.0.1
 pkgrel=1
 pkgdesc="Preview-style PDF viewer and reviewer for Linux"
 arch=('any')
-url="https://github.com/Skeptomenos/omapreview"
+url="https://github.com/Skeptomenos/omepreview"
 license=('AGPL-3.0-or-later')
 depends=('python' 'python-pymupdf' 'gtk4' 'python-gobject' 'python-cairo')
 optdepends=(
-  'python-mcp: MCP server for AI agents (omapreview-mcp)'
+  'python-mcp: MCP server for AI agents (omepreview-mcp)'
   'omarchy: bar widget and menu-based PDF picker'
 )
 makedepends=('python-build' 'python-installer' 'python-hatchling')
@@ -24,14 +24,14 @@ package() {
   cd "$pkgname-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  install -Dm755 bin/omapreview-pick "$pkgdir/usr/bin/omapreview-pick"
-  install -Dm644 share/omapreview.desktop "$pkgdir/usr/share/applications/omapreview.desktop"
+  install -Dm755 bin/omepreview-pick "$pkgdir/usr/bin/omepreview-pick"
+  install -Dm644 share/omepreview.desktop "$pkgdir/usr/share/applications/omepreview.desktop"
 
   # Omarchy bar widget, discoverable for manual linking into
   # ~/.config/omarchy/plugins/
-  install -d "$pkgdir/usr/share/omapreview"
-  cp -r shell-plugin "$pkgdir/usr/share/omapreview/shell-plugin"
-  cp -r skill "$pkgdir/usr/share/omapreview/skill"
+  install -d "$pkgdir/usr/share/omepreview"
+  cp -r shell-plugin "$pkgdir/usr/share/omepreview/shell-plugin"
+  cp -r skill "$pkgdir/usr/share/omepreview/skill"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

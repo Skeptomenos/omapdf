@@ -5,7 +5,7 @@ import json
 
 import pymupdf
 
-from omapreview.page_clipboard import (
+from omepreview.page_clipboard import (
     MIME_OMAPDF_PAGES,
     pdf_bytes_from_clipboard_text,
     push_clipboard,

@@ -3,8 +3,8 @@
 import pymupdf
 import pytest
 
-from omapreview import engine, read
-from omapreview.ops import OpError, validate
+from omepreview import engine, read
+from omepreview.ops import OpError, validate
 
 
 @pytest.fixture()

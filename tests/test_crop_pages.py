@@ -3,9 +3,9 @@
 import pymupdf
 import pytest
 
-from omapreview import engine, read
-from omapreview.crop_coords import transform_pending_for_crop
-from omapreview.ops import OpError
+from omepreview import engine, read
+from omepreview.crop_coords import transform_pending_for_crop
+from omepreview.ops import OpError
 from tests.data.make_docs import make_labeled_pdf
 
 
@@ -94,6 +94,6 @@ def test_transform_pending_for_crop():
 
 def test_crop_validation():
     with pytest.raises(OpError, match="positive width"):
-        from omapreview.ops import validate
+        from omepreview.ops import validate
 
         validate({"op": "crop_pages", "pages": [1], "rect": [10, 10, 10, 50]})

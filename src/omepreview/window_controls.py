@@ -22,7 +22,7 @@ def detect_omarchy_environment() -> bool:
 
 
 def window_controls_enabled() -> bool:
-    """Whether omapreview should show a thin HeaderBar with min/max/close only."""
+    """Whether omepreview should show a thin HeaderBar with min/max/close only."""
     override = os.environ.get("OMAPDF_WINDOW_CONTROLS")
     if override == "1":
         return True

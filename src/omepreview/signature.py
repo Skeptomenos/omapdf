@@ -1,7 +1,7 @@
 """Signature store: named signature images kept in the user's config dir.
 
 Signatures are ordinary PNG files (ideally with a transparent background) in
-~/.config/omapreview/signatures/. The name "default" is what `place_signature`
+~/.config/omepreview/signatures/. The name "default" is what `place_signature`
 uses when no name is given.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 def store_dir() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    d = base / "omapreview" / "signatures"
+    d = base / "omepreview" / "signatures"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -42,7 +42,7 @@ def get(name: str = "default") -> Path:
         known = ", ".join(list_names()) or "(none saved)"
         raise FileNotFoundError(
             f"no signature named {name!r}. Saved signatures: {known}. "
-            f"Add one with: omapreview sig add <image.png> --name {name}"
+            f"Add one with: omepreview sig add <image.png> --name {name}"
         )
     return p
 

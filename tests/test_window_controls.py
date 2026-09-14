@@ -3,7 +3,7 @@
 import os
 from unittest import mock
 
-from omapreview import window_controls as wc
+from omepreview import window_controls as wc
 
 
 def test_override_force_on():

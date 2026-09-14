@@ -1,4 +1,4 @@
-"""omapreview command-line interface.
+"""omepreview command-line interface.
 
 Designed to be equally pleasant for humans and agents: every command that
 reports state supports --json, errors are one actionable line on stderr, and
@@ -192,21 +192,21 @@ def cmd_sig(args):
             raise SystemExit(1)
     elif args.sig_cmd == "list":
         names = signature.list_names()
-        print("\n".join(names) if names else "(no signatures saved — omapreview sig add <image.png>)")
+        print("\n".join(names) if names else "(no signatures saved — omepreview sig add <image.png>)")
     elif args.sig_cmd == "remove":
         signature.remove(args.name)
         print(f"removed signature {args.name!r}")
 
 
 def cmd_open(args):
-    # Opening a PDF means the omapreview editor. OMAPDF_VIEWER forces an external
-    # viewer instead — but never xdg-open: omapreview may itself be the desktop's
+    # Opening a PDF means the omepreview editor. OMAPDF_VIEWER forces an external
+    # viewer instead — but never xdg-open: omepreview may itself be the desktop's
     # default PDF handler, and xdg-open would loop straight back to us.
     override = os.environ.get("OMAPDF_VIEWER")
     if override:
         cmd = [*shlex.split(override), args.pdf]
     else:
-        cmd = [sys.executable, "-m", "omapreview.cli", "edit", args.pdf]
+        cmd = [sys.executable, "-m", "omepreview.cli", "edit", args.pdf]
     subprocess.Popen(cmd, start_new_session=True)
 
 
@@ -297,10 +297,10 @@ def cmd_snapshot(args):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="omapreview",
+        prog="omepreview",
         description="Agent-native PDF annotation and signing.",
     )
-    parser.add_argument("--version", action="version", version=f"omapreview {__version__}")
+    parser.add_argument("--version", action="version", version=f"omepreview {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("read", help="structured document read (JSON)")
@@ -356,7 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "delete-annotation",
-        help="remove an annotation by page and 0-based index from omapreview read",
+        help="remove an annotation by page and 0-based index from omepreview read",
     )
     p.add_argument("pdf")
     p.add_argument("--page", type=int, required=True)
@@ -448,7 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("pdf")
     p.set_defaults(func=cmd_open)
 
-    p = sub.add_parser("edit", help="open the omapreview editor (annotate, sign, drag)")
+    p = sub.add_parser("edit", help="open the omepreview editor (annotate, sign, drag)")
     p.add_argument("pdf")
     p.add_argument("--ops", help="ops JSON to load as draggable proposals")
     p.set_defaults(func=cmd_edit)

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pick a recent PDF and open it. Bundled with the omapdf.bar Omarchy plugin
-# so the widget works standalone: prefers the omapreview editor when installed,
+# so the widget works standalone: prefers the omepreview editor when installed,
 # falls back to the system PDF handler otherwise.
 
 set -uo pipefail
@@ -25,7 +25,7 @@ if (( ${#existing[@]} > 0 )); then
 fi
 
 if (( ${#files[@]} == 0 )); then
-  notify-send "omapreview" "No PDFs found in ${dirs//:/, }"
+  notify-send "omepreview" "No PDFs found in ${dirs//:/, }"
   exit 0
 fi
 
@@ -62,8 +62,8 @@ index="${subtext%% *}"
 path="${files[$((index - 1))]:-}"
 [[ -n $path && -f $path ]] || exit 1
 
-if command -v omapreview >/dev/null 2>&1; then
-  exec omapreview open "$path"
+if command -v omepreview >/dev/null 2>&1; then
+  exec omepreview open "$path"
 else
   exec xdg-open "$path"
 fi

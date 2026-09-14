@@ -7,8 +7,8 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from omapreview import engine
-from omapreview.ops import OpError
+from omepreview import engine
+from omepreview.ops import OpError
 from tests.data.make_docs import make_image_asset, make_image_only_page_pdf, make_secret_pdf
 
 

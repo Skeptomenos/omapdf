@@ -7,9 +7,9 @@ import sys
 import pymupdf
 import pytest
 
-from omapreview import engine, pages as pages_mod
-from omapreview.mcp_server import delete_pages, extract_pages, insert_pages, list_pages, rotate_pages
-from omapreview.ops import OpError
+from omepreview import engine, pages as pages_mod
+from omepreview.mcp_server import delete_pages, extract_pages, insert_pages, list_pages, rotate_pages
+from omepreview.ops import OpError
 from tests.data.make_docs import make_image_asset, make_labeled_pdf
 
 
@@ -181,7 +181,7 @@ def test_extract_pages(tmp_path, five_page_pdf):
 
 def test_cli_pages_list(six_page_pdf):
     run = subprocess.run(
-        [sys.executable, "-m", "omapreview.cli", "pages", str(six_page_pdf), "--list"],
+        [sys.executable, "-m", "omepreview.cli", "pages", str(six_page_pdf), "--list"],
         capture_output=True,
         text=True,
     )
@@ -195,7 +195,7 @@ def test_cli_pages_delete_dry_run_json(five_page_pdf):
         [
             sys.executable,
             "-m",
-            "omapreview.cli",
+            "omepreview.cli",
             "pages",
             str(five_page_pdf),
             "--delete",
@@ -218,7 +218,7 @@ def test_cli_pages_move(six_page_pdf, tmp_path):
         [
             sys.executable,
             "-m",
-            "omapreview.cli",
+            "omepreview.cli",
             "pages",
             str(six_page_pdf),
             "--move",
@@ -277,7 +277,7 @@ def test_edit_command_still_available(six_page_pdf):
     """Slice 1 regression — edit subcommand still routes to the GTK editor."""
     import inspect
 
-    from omapreview.cli import build_parser, cmd_edit
+    from omepreview.cli import build_parser, cmd_edit
 
     args = build_parser().parse_args(["edit", str(six_page_pdf)])
     assert args.command == "edit"

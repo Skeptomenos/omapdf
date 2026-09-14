@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "omapreview"
-version = "0.1.0"
+name = "omepreview"
+version = "0.0.1"
 description = "Preview-style PDF viewer and reviewer for Linux"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -20,11 +20,11 @@ mcp = ["mcp>=1.2"]
 dev = ["pytest", "mcp>=1.2"]
 
 [project.scripts]
-omapreview = "omapreview.cli:main"
-omapreview-mcp = "omapreview.mcp_server:main"
+omepreview = "omepreview.cli:main"
+omepreview-mcp = "omepreview.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/Skeptomenos/omapreview"
+Homepage = "https://github.com/Skeptomenos/omepreview"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omapreview"]
+packages = ["src/omepreview"]

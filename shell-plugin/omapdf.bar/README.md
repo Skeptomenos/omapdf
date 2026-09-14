@@ -6,7 +6,7 @@ in the [omapdf](https://github.com/pbergin11/omapdf) editor when installed
 (read, annotate, sign, ask your agent about it), otherwise in your system
 PDF viewer. When no PDFs are found it tells you via a notification.
 
-Works standalone — omapreview itself is optional but recommended: it's the
+Works standalone — omepreview itself is optional but recommended: it's the
 agent-native PDF editor this widget is the front door to.
 
 ## Install

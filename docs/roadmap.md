@@ -8,17 +8,17 @@
 - [x] Structured read: text blocks + bboxes, form fields, annotations (with
   0-based `index` for delete)
 - [x] CLI with `--json`/`--dry-run` everywhere; atomic `apply` batches
-- [x] MCP server (`omapreview-mcp`) with confirm-before-signing posture
+- [x] MCP server (`omepreview-mcp`) with confirm-before-signing posture
 - [x] Signature store + `sig draw` GTK drawing window
 - [x] Claude Code skill: full PDF-assistant playbook with the precision
   ladder (anchors → grid snapshot → dry-run → visual verify → ghost handoff)
 - [x] `snapshot --grid`: page PNG with a labeled ops-coordinate grid so
   agents can read placement coordinates visually
-- [x] Omarchy bar widget (`omapreview`.bar`) + recent-PDFs picker
+- [x] Omarchy bar widget (`omepreview`.bar`) + recent-PDFs picker
 - [x] Test suite over generated sample documents
 
 **v0.2/v0.3 — the editor** (arrived early, in GTK4 rather than Qt)
-- [x] `omapreview edit`: page view, hand-drawn vector icon toolbar, pill styling
+- [x] `omepreview edit`: page view, hand-drawn vector icon toolbar, pill styling
 - [x] Tools: select/drag, pen + tap-again color palette, highlighter, text,
   sticky notes, signature, check/cross stamps, **redact** (R)
 - [x] Ghost model with undo/redo **across the save boundary** (a save is an
@@ -32,11 +32,11 @@
   show in folder, flatten-copy-first toggle
 - [x] Ask-your-agent (✦ → `omarchy agent prompt` with the file) + disk
   watcher that reloads the view when the agent saves changes
-- [x] Default-PDF-handler desktop file (`omapreview open` → the editor)
+- [x] Default-PDF-handler desktop file (`omepreview open` → the editor)
 
 **Preview parity — page surgery (M1)**
 - [x] Page ops: `rotate_pages`, `delete_pages`, `move_pages`, `insert_pages`,
-  `extract_pages` — engine, CLI (`omapreview pages`), MCP, tests
+  `extract_pages` — engine, CLI (`omepreview pages`), MCP, tests
 - [x] GTK thumbnail sidebar: multi-select, drag reorder, delete/rotate
   shortcuts, context menu, file-drop insert, extract dialog, scratch preview
 - [x] Two-window page clipboard (`application/x-omapdf-pages` + PDF fallback);
@@ -44,7 +44,7 @@
 
 **Preview parity — safe share (M2)**
 - [x] True `redact` op (text + image pixels removed, verify hook)
-- [x] CLI `omapreview redact`, MCP `redact` (dry-run default)
+- [x] CLI `omepreview redact`, MCP `redact` (dry-run default)
 - [x] GTK redact tool: text-snap and free-rectangle modes; ghosts until Save;
   default `*_redacted.pdf` save-as-copy
 - [x] Documented: **pen/ink is not redact**
@@ -52,19 +52,19 @@
 **Preview parity — daily driver (M3)**
 - [x] GUI form field hit-test → `fill_field` on Save
 - [x] `delete_annotation` op + Delete on selected saved markup
-- [x] CLI `omapreview delete-annotation`, MCP `delete_annotation` (dry-run default)
+- [x] CLI `omepreview delete-annotation`, MCP `delete_annotation` (dry-run default)
 - [x] Manual checklist: [docs/preview-parity.md](preview-parity.md)
 
 ## Next
 
-- **`omapreview sign --auto`** — signature-line detection: "Signature:"/"Sign
+- **`omepreview sign --auto`** — signature-line detection: "Signature:"/"Sign
   here" labels, ruled lines, signature-type fields → ranked placement
   proposals; agents and the editor both consume them as ghosts
 - **Comments summary page** — append a final page listing every comment
   with its page number, for recipients with weak viewers or paper
 - **Stamp library** — APPROVED / DRAFT / PAID / initials as a `stamp` op
   and an editor picker
-- **`omapreview diff a.pdf b.pdf`** — agent-friendly version comparison
+- **`omepreview diff a.pdf b.pdf`** — agent-friendly version comparison
 - **Toolbar overflow menu** — collapse tools into ⋯ at narrow widths
 - **Selection → agent context** — "ask about this selection" sends the
   selected region's text along with the question
@@ -73,7 +73,7 @@
 
 - **Cryptographic signing (v0.4)** — PAdES via pyHanko as an optional
   extra: certificates, visible + cryptographic signature in one op,
-  `omapreview verify`. Kept clearly distinct from visual signing in the UX.
+  `omepreview verify`. Kept clearly distinct from visual signing in the UX.
 - **P2 editor ops** — shapes (line, arrow, rect, oval), crop page,
   encrypt/permissions on save-as, outline sidebar, two-page view,
   paranoid raster redact mode, print action

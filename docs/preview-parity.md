@@ -5,7 +5,7 @@ coverage lives in `tests/`; use this list when validating on Omarchy or a
 plain-GTK desktop.
 
 **Surfaces:** exercise each row on **CLI**, **MCP** (where the op exists),
-and **GTK editor** (`omapreview edit`) unless marked GUI-only.
+and **GTK editor** (`omepreview edit`) unless marked GUI-only.
 
 ## Page surgery (M1)
 
@@ -33,7 +33,7 @@ and **GTK editor** (`omapreview edit`) unless marked GUI-only.
 
 | # | Check | Pass |
 |---|--------|------|
-| 13 | Two `omapreview edit` windows: copy 2 pages in A, paste in B → independent files after Save | ☐ |
+| 13 | Two `omepreview edit` windows: copy 2 pages in A, paste in B → independent files after Save | ☐ |
 | 14 | Ctrl+C/V/X with sidebar focus; Delete does not remove pages when a text entry has focus | ☐ |
 
 ## Redaction (M2)
@@ -50,8 +50,8 @@ and **GTK editor** (`omapreview edit`) unless marked GUI-only.
 
 | # | Check | Pass |
 |---|--------|------|
-| 20 | Click empty AcroForm field → type → Save → `omapreview read` shows value | ☐ |
-| 21 | Select saved annotation → Delete → Save → annot gone in `omapreview read` | ☐ |
+| 20 | Click empty AcroForm field → type → Save → `omepreview read` shows value | ☐ |
+| 21 | Select saved annotation → Delete → Save → annot gone in `omepreview read` | ☐ |
 
 ## Regression
 
@@ -65,7 +65,7 @@ and **GTK editor** (`omapreview edit`) unless marked GUI-only.
 
 | # | Check | Pass |
 |---|--------|------|
-| 25 | `omapreview shape` line/arrow/rect/oval → `omapreview read` shows Line/Square/Circle annot | ☐ |
+| 25 | `omepreview shape` line/arrow/rect/oval → `omepreview read` shows Line/Square/Circle annot | ☐ |
 | 26 | MCP `add_shape` applies same geometry as CLI | ☐ |
 | 27 | GTK: Shapes tool drag → ghosts → Save → annots in `read` | ☐ |
 
@@ -73,7 +73,7 @@ and **GTK editor** (`omapreview edit`) unless marked GUI-only.
 
 | # | Check | Pass |
 |---|--------|------|
-| 28 | `omapreview crop --rect …` shrinks page CropBox; `read` size matches | ☑ |
+| 28 | `omepreview crop --rect …` shrinks page CropBox; `read` size matches | ☑ |
 | 29 | Highlight/shape coords still align after crop (regression) | ☑ |
 | 30 | GTK: Crop tool drag → page aspect updates → Save persists | ☑ |
 
@@ -86,10 +86,10 @@ and **GTK editor** (`omapreview edit`) unless marked GUI-only.
 
 ```bash
 python -m pytest tests/ -q
-omapreview pages doc.pdf --list
-omapreview redact doc.pdf --page 1 --match "SECRET" -o out.pdf --dry-run --json
-omapreview delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
-omapreview shape doc.pdf --page 1 --shape rect --rect 72,100,200,180 -o out.pdf
-omapreview crop doc.pdf --page 1 --rect 50,50,500,750 -o out.pdf
-omapreview read out.pdf --json
+omepreview pages doc.pdf --list
+omepreview redact doc.pdf --page 1 --match "SECRET" -o out.pdf --dry-run --json
+omepreview delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
+omepreview shape doc.pdf --page 1 --shape rect --rect 72,100,200,180 -o out.pdf
+omepreview crop doc.pdf --page 1 --rect 50,50,500,750 -o out.pdf
+omepreview read out.pdf --json
 ```

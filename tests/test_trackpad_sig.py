@@ -1,6 +1,6 @@
 """Trackpad signature capture policy tests."""
 
-from omapreview.trackpad_sig import (
+from omepreview.trackpad_sig import (
     LIGHT_PRESSURE,
     should_capture,
     stroke_mode_label,

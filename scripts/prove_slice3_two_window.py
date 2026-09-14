@@ -18,14 +18,14 @@ from gi.repository import Gdk, Gtk
 
 import pymupdf
 
-from omapreview import engine, pages as pages_mod
-from omapreview.page_clipboard import (
+from omepreview import engine, pages as pages_mod
+from omepreview.page_clipboard import (
     read_clipboard_pdf_bytes,
     push_clipboard,
     serialize_pages,
     write_temp_pdf,
 )
-from omapreview.page_preview import PagePreviewState
+from omepreview.page_preview import PagePreviewState
 from tests.data.make_docs import make_labeled_pdf
 
 EVIDENCE = Path(

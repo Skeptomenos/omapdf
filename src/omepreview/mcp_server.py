@@ -1,10 +1,10 @@
-"""omapreview MCP server — the agent's native doorway.
+"""omepreview MCP server — the agent's native doorway.
 
 Every tool here is a thin wrapper over the same op engine the CLI and GUI
-use; nothing is agent-only or human-only. Run with `omapreview-mcp` (stdio), or
+use; nothing is agent-only or human-only. Run with `omepreview-mcp` (stdio), or
 register with Claude Code:
 
-    claude mcp add omapreview -- omapreview-mcp
+    claude mcp add omepreview -- omepreview-mcp
 
 Safety posture: place_signature defaults to a dry run that returns the
 resolved placement rectangle for confirmation. Pass confirmed=true (after a
@@ -21,14 +21,14 @@ except ImportError:  # SDK v1
 
 from . import engine, pages as pages_mod, read, signature
 
-mcp = _Server("omapreview")
+mcp = _Server("omepreview")
 
 
 @mcp.tool()
 def read_pdf(path: str, pages: list[int] | None = None, text_only: bool = False) -> dict:
     """Read a PDF's structure: pages, text blocks with bounding boxes, form
     fields, and annotations. Coordinates are PDF points, origin top-left —
-    the same system every other omapreview tool accepts."""
+    the same system every other omepreview tool accepts."""
     return read.extract(path, pages=pages, text_only=text_only)
 
 
@@ -229,7 +229,7 @@ def delete_annotation(
     output: str | None = None,
     confirm: bool = False,
 ) -> dict:
-    """Delete one annotation on `page` by 0-based `index` (see omapreview read).
+    """Delete one annotation on `page` by 0-based `index` (see omepreview read).
 
     Defaults to dry-run — pass confirm=true after the user approves."""
     result = engine.apply(

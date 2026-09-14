@@ -74,7 +74,7 @@ def write_pages_to_file(doc: pymupdf.Document, pages_1based: list[int], dest: st
 
 
 def push_clipboard(json_bytes: bytes, pdf_bytes: bytes) -> None:
-    """Write omapreview pages to the system clipboard (GTK + xclip on X11)."""
+    """Write omepreview pages to the system clipboard (GTK + xclip on X11)."""
     import shutil
     import subprocess
 
@@ -107,7 +107,7 @@ def push_clipboard(json_bytes: bytes, pdf_bytes: bytes) -> None:
 
 
 def read_clipboard_pdf_bytes() -> bytes | None:
-    """Read omapreview page bytes from the system clipboard (xclip + GTK)."""
+    """Read omepreview page bytes from the system clipboard (xclip + GTK)."""
     import shutil
     import subprocess
 

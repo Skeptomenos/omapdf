@@ -2,9 +2,9 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// omapreview pill: a PDF glyph in the bar. Click runs the bundled picker
+// omepreview pill: a PDF glyph in the bar. Click runs the bundled picker
 // (recent PDFs from Downloads/Documents/Desktop) and opens the chosen file
-// — in the omapreview editor when installed, else the system PDF handler.
+// — in the omepreview editor when installed, else the system PDF handler.
 //
 // Settings (omarchy bar set omapdf.bar <key> <value>):
 //   icon     - glyph shown in the bar (default: nf-fa-file_pdf)

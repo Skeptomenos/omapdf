@@ -61,7 +61,7 @@ def _gtk_main(out_path: str, *, trackpad: bool = True) -> int:
         gi.require_foreign("cairo")
     except (ImportError, ValueError) as exc:
         raise SystemExit(
-            "omapreview sig draw needs PyGObject cairo integration — install python3-gi-cairo."
+            "omepreview sig draw needs PyGObject cairo integration — install python3-gi-cairo."
         ) from exc
     import cairo
     from gi.repository import Gdk, Gtk
@@ -131,7 +131,7 @@ def _gtk_main(out_path: str, *, trackpad: bool = True) -> int:
             return False
         return bool(event.get_state() & Gdk.ModifierType.BUTTON1_MASK)
 
-    app = Gtk.Application(application_id="org.omapreview.SignatureDraw")
+    app = Gtk.Application(application_id="org.omepreview.SignatureDraw")
 
     def on_activate(app):
         nonlocal area, hint
