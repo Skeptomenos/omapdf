@@ -274,6 +274,27 @@ def _verify_redact(page: pymupdf.Page, match: str | None, rects: list[pymupdf.Re
     return {"text_still_present": still}
 
 
+def _apply_delete_annotation(doc, op, *, dry_run: bool) -> dict:
+    page = _page(doc, op["page"])
+    annots = list(page.annots() or [])
+    index = op["index"]
+    if index >= len(annots):
+        raise OpError(
+            f"annotation index {index} out of range on page {op['page']} "
+            f"(page has {len(annots)} annotation(s); run `omapdf read` to list them)"
+        )
+    annot = annots[index]
+    result = {
+        "index": index,
+        "type": annot.type[1],
+        "rect": list(annot.rect),
+    }
+    if dry_run:
+        return result
+    page.delete_annot(annot)
+    return result
+
+
 def _apply_redact(doc, op, *, dry_run: bool) -> dict:
     page = _page(doc, op["page"])
     fill = tuple(op.get("fill", [0, 0, 0]))
@@ -384,6 +405,16 @@ def _save(doc: pymupdf.Document, source: Path, output: Path) -> None:
         doc.close()
 
 
+def _order_ops(ops: list[dict]) -> list[dict]:
+    """Delete annotations high-to-low per page so indices stay valid in a batch."""
+    deletes = [op for op in ops if op["op"] == "delete_annotation"]
+    if not deletes or len(deletes) == 1:
+        return ops
+    rest = [op for op in ops if op["op"] != "delete_annotation"]
+    deletes.sort(key=lambda op: (op["page"], op["index"]), reverse=True)
+    return rest + deletes
+
+
 def apply(
     pdf: str | Path,
     op_list: list[dict],
@@ -399,7 +430,7 @@ def apply(
     pdf = Path(pdf)
     if not pdf.is_file():
         raise FileNotFoundError(f"no such PDF: {pdf}")
-    validated = ops_mod.validate_all(op_list)
+    validated = _order_ops(ops_mod.validate_all(op_list))
     output = Path(output) if output else pdf
 
     doc = pymupdf.open(str(pdf))
@@ -413,6 +444,8 @@ def apply(
                 resolution = _apply_extract_pages(doc, op, dry_run=dry_run)
             elif op["op"] == "redact":
                 resolution = _apply_redact(doc, op, dry_run=dry_run)
+            elif op["op"] == "delete_annotation":
+                resolution = _apply_delete_annotation(doc, op, dry_run=dry_run)
             else:
                 resolution = _APPLIERS[op["op"]](doc, op)
             applied.append({**op, **resolution, "applied": not dry_run})

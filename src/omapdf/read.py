@@ -41,9 +41,10 @@ def _fields(page: pymupdf.Page) -> list[dict]:
 
 def _annotations(page: pymupdf.Page) -> list[dict]:
     annots = []
-    for a in page.annots() or []:
+    for index, a in enumerate(page.annots() or []):
         annots.append(
             {
+                "index": index,
                 "type": a.type[1],
                 "rect": list(a.rect),
                 "content": a.info.get("content", ""),

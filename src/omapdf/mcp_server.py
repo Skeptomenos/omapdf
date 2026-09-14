@@ -222,6 +222,30 @@ def extract_pages(
 
 
 @mcp.tool()
+def delete_annotation(
+    path: str,
+    page: int,
+    index: int,
+    output: str | None = None,
+    confirm: bool = False,
+) -> dict:
+    """Delete one annotation on `page` by 0-based `index` (see omapdf read).
+
+    Defaults to dry-run — pass confirm=true after the user approves."""
+    result = engine.apply(
+        path,
+        [{"op": "delete_annotation", "page": page, "index": index}],
+        output=output,
+        dry_run=not confirm,
+    )
+    if not confirm:
+        result["needs_confirmation"] = (
+            "Dry run only. Re-call with confirm=true after the user approves."
+        )
+    return result
+
+
+@mcp.tool()
 def redact(
     path: str,
     page: int,
