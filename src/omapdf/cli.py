@@ -36,6 +36,13 @@ def _rect(value: str) -> list[float]:
     return [float(p) for p in parts]
 
 
+def _rgb(value: str) -> list[float]:
+    parts = value.split(",")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(f"expected R,G,B in 0..1 — got {value!r}")
+    return [float(p) for p in parts]
+
+
 def _emit(data, as_json: bool):
     if as_json:
         json.dump(data, sys.stdout, indent=2)
@@ -117,6 +124,17 @@ def cmd_sign(args):
         "signature": args.sig,
         "date": args.date,
     }
+    _run_edit(args, [op])
+
+
+def cmd_redact(args):
+    op = {"op": "redact", "page": args.page}
+    if args.match:
+        op["match"] = args.match
+    else:
+        op["rect"] = args.rect
+    if args.fill:
+        op["fill"] = args.fill
     _run_edit(args, [op])
 
 
@@ -303,6 +321,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", action="store_true", help="stamp today's date below")
     _out_args(p)
     p.set_defaults(func=cmd_sign)
+
+    p = sub.add_parser("redact", help="permanently remove text or image pixels in a region")
+    p.add_argument("pdf")
+    p.add_argument("--page", type=int, required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--match", help="redact every occurrence of this text on the page")
+    group.add_argument("--rect", type=_rect, help="X0,Y0,X1,Y1 in points, top-left origin")
+    p.add_argument(
+        "--fill",
+        type=_rgb,
+        help="optional fill RGB as R,G,B in 0..1 (default 0,0,0)",
+    )
+    _out_args(p)
+    p.set_defaults(func=cmd_redact)
 
     p = sub.add_parser("flatten", help="bake annotations and form fields into the page")
     p.add_argument("pdf")

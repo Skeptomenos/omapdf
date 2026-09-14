@@ -251,6 +251,71 @@ def _apply_insert_pages(doc, op) -> dict:
         src_doc.close()
 
 
+def _text_in_rects(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> bool:
+    """True when extractable text still intersects any of the redaction rects."""
+    for block in page.get_text("blocks"):
+        if len(block) < 5:
+            continue
+        snippet = str(block[4]).strip()
+        if not snippet:
+            continue
+        br = pymupdf.Rect(block[:4])
+        for rect in rects:
+            if br.intersects(rect):
+                return True
+    return False
+
+
+def _verify_redact(page: pymupdf.Page, match: str | None, rects: list[pymupdf.Rect]) -> dict:
+    if match is not None:
+        still = match in page.get_text()
+    else:
+        still = _text_in_rects(page, rects)
+    return {"text_still_present": still}
+
+
+def _apply_redact(doc, op, *, dry_run: bool) -> dict:
+    page = _page(doc, op["page"])
+    fill = tuple(op.get("fill", [0, 0, 0]))
+    apply_now = op.get("apply_now", True)
+
+    if "match" in op:
+        match = op["match"]
+        rects = page.search_for(match)
+        if not rects:
+            raise OpError(
+                f"text {match!r} not found on page {op['page']}; "
+                "run `omapdf read` to see the page's actual text"
+            )
+        verify_match = match
+    else:
+        rects = [pymupdf.Rect(op["rect"])]
+        verify_match = None
+
+    result = {"rects": [list(r) for r in rects]}
+
+    if dry_run:
+        return result
+
+    if not apply_now:
+        for rect in rects:
+            page.add_redact_annot(rect, fill=fill)
+        return result
+
+    for rect in rects:
+        page.add_redact_annot(rect, fill=fill)
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS)
+
+    verify = _verify_redact(page, verify_match, rects)
+    result["verify"] = verify
+    if verify["text_still_present"]:
+        raise OpError(
+            f"redact verify failed on page {op['page']}: text still present after "
+            "redaction — widen the region or check for overlapping content"
+        )
+    return result
+
+
 def _apply_extract_pages(doc, op, *, dry_run: bool) -> dict:
     pages = op["pages"]
     _validate_page_indices(doc, pages)
@@ -346,6 +411,8 @@ def apply(
         for op in validated:
             if op["op"] == "extract_pages":
                 resolution = _apply_extract_pages(doc, op, dry_run=dry_run)
+            elif op["op"] == "redact":
+                resolution = _apply_redact(doc, op, dry_run=dry_run)
             else:
                 resolution = _APPLIERS[op["op"]](doc, op)
             applied.append({**op, **resolution, "applied": not dry_run})

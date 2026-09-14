@@ -111,11 +111,27 @@ pixels. Report includes `inserted` and which variant was used.
 Writes selected pages to `to`. Does not modify the source document. Report:
 `{ "pages": [...], "to": "excerpt.pdf" }`.
 
+### redact
+```json
+{"op": "redact", "page": 1, "match": "Jane Doe"}
+{"op": "redact", "page": 1, "rect": [72, 400, 300, 430], "fill": [0, 0, 0]}
+```
+Exactly one of `match` (every occurrence on the page) or `rect`. On apply,
+PyMuPDF `add_redact_annot` + `apply_redactions()` removes matched text and
+intersecting image samples, then fills the region opaque (default black).
+`apply_now: false` adds redaction annotations as editable ghosts until a later
+apply. Report adds `rects` and `verify: { "text_still_present": false }`; if
+verify fails, the whole batch fails.
+
+**Pen / ink is not redact.** Drawing a black ink stroke or rectangle overlay
+covers content visually but leaves the underlying text in `get_text()` /
+`pdftotext`. Only the `redact` op destroys content.
+
 ## Extending
 
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
 entry here + a test. Keep ops small and composable; a batch is the unit of
 atomicity.
 
-Planned: `stamp` (library images: APPROVED, initials), `delete_annotation`,
-`redact`. See docs/roadmap.md.
+Planned: `stamp` (library images: APPROVED, initials), `delete_annotation`.
+See docs/roadmap.md.
