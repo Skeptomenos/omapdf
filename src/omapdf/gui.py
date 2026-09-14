@@ -28,7 +28,9 @@ import pymupdf
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import engine
+from . import gui_pages
 from . import signature as sig_store
+from .page_preview import PagePreviewState
 
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
 CROSS = [[(0.0, 0.0), (12.0, 12.0)], [(12.0, 0.0), (0.0, 12.0)]]
@@ -99,6 +101,14 @@ label.toast-banner {
   padding: 7px 16px;
   margin-top: 8px;
 }
+listbox row.omapdf-thumb-selected {
+  background: alpha(#2f74d0, 0.22);
+  border-radius: 6px;
+}
+listbox row.omapdf-thumb-inserted {
+  border: 1px solid alpha(#2e9e4f, 0.55);
+  border-radius: 6px;
+}
 """
 
 
@@ -127,19 +137,39 @@ class Editor:
         self.search_term = ""
         self.search_hits: list[tuple[int, pymupdf.Rect]] = []
         self.search_pos = -1
+        self.page_preview = PagePreviewState(self.path)
+        self.window: Gtk.Window | None = None
+        self._view_doc: pymupdf.Document | None = None
         if ops_file:
             self._load_proposals(ops_file)
 
     # ---- model ----------------------------------------------------------
 
+    def invalidate_view(self):
+        if self._view_doc is not None:
+            self._view_doc.close()
+            self._view_doc = None
+
+    def viewing_doc(self) -> pymupdf.Document:
+        if self._view_doc is None:
+            self._view_doc = self.page_preview.open_view()
+        return self._view_doc
+
     def page(self) -> pymupdf.Page:
-        return self.doc[self.page_no]
+        return self.viewing_doc()[self.page_no]
+
+    def page_count(self) -> int:
+        return self.viewing_doc().page_count
 
     def checkpoint(self):
-        self.undo_stack.append({"kind": "pending", "pending": copy.deepcopy(self.pending)})
+        self.undo_stack.append({
+            "kind": "pending",
+            "pending": copy.deepcopy(self.pending),
+            "page_ops": copy.deepcopy(self.page_preview.page_ops),
+        })
         self.redo_stack.clear()
 
-    def record_save(self, file_before: bytes, pending_before: list[dict]):
+    def record_save(self, file_before: bytes, pending_before: list[dict], page_ops_before: list[dict]):
         """A save is an undoable step too: undoing it reverts the file and
         resurrects the saved items as editable ghosts."""
         self.undo_stack.append({
@@ -147,6 +177,7 @@ class Editor:
             "file_before": file_before,
             "file_after": Path(self.path).read_bytes(),
             "pending_before": pending_before,
+            "page_ops_before": page_ops_before,
         })
         self.redo_stack.clear()
 
@@ -154,6 +185,7 @@ class Editor:
         self.doc.close()
         Path(self.path).write_bytes(data)
         self.doc = pymupdf.open(self.path)
+        self.invalidate_view()
 
     def undo(self) -> bool:
         """Returns True when the file itself changed (a save was reverted)."""
@@ -161,13 +193,23 @@ class Editor:
             return False
         entry = self.undo_stack.pop()
         if entry["kind"] == "pending":
-            self.redo_stack.append({"kind": "pending", "pending": self.pending})
+            self.redo_stack.append({
+                "kind": "pending",
+                "pending": self.pending,
+                "page_ops": copy.deepcopy(self.page_preview.page_ops),
+            })
             self.pending = entry["pending"]
+            self.page_preview.page_ops = copy.deepcopy(entry.get("page_ops", []))
+            self.page_preview.rebuild()
+            self.invalidate_view()
             self.selected = None
             return False
         self.redo_stack.append(entry)
         self._restore_file(entry["file_before"])
         self.pending = copy.deepcopy(entry["pending_before"])
+        self.page_preview.page_ops = copy.deepcopy(entry.get("page_ops_before", []))
+        self.page_preview.rebuild()
+        self.invalidate_view()
         self.selected = None
         return True
 
@@ -176,13 +218,23 @@ class Editor:
             return False
         entry = self.redo_stack.pop()
         if entry["kind"] == "pending":
-            self.undo_stack.append({"kind": "pending", "pending": self.pending})
+            self.undo_stack.append({
+                "kind": "pending",
+                "pending": self.pending,
+                "page_ops": copy.deepcopy(self.page_preview.page_ops),
+            })
             self.pending = entry["pending"]
+            self.page_preview.page_ops = copy.deepcopy(entry.get("page_ops", []))
+            self.page_preview.rebuild()
+            self.invalidate_view()
             self.selected = None
             return False
         self.undo_stack.append(entry)
         self._restore_file(entry["file_after"])
         self.pending = []
+        self.page_preview.clear()
+        self.page_preview.rebuild()
+        self.invalidate_view()
         self.selected = None
         return True
 
@@ -307,11 +359,21 @@ def run(pdf: str, ops_file: str | None = None) -> int:
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
         win.set_default_size(980, 900)
+        ed.window = win
 
         area = Gtk.DrawingArea()
+        sidebar_api = {
+            "refresh": lambda: None,
+            "select_row": lambda _n: None,
+            "sidebar_focus": {"active": False},
+            "delete_selected_pages": lambda: None,
+            "rotate_selected": lambda _d: None,
+            "insert_blank_after_current": lambda: None,
+        }
 
         def refresh_title():
-            dot = " •" if ed.pending else ""
+            dirty = ed.pending or ed.page_preview.has_changes()
+            dot = " •" if dirty else ""
             win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
 
         def fit_width_zoom():
@@ -337,9 +399,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             )
             area.set_content_width(pix.width)
             area.set_content_height(pix.height)
-            page_label.set_text(f"{ed.page_no + 1} / {ed.doc.page_count}")
+            page_label.set_text(f"{ed.page_no + 1} / {ed.page_count()}")
             update_nav()
-            select_thumb(ed.page_no)
+            sidebar_api["select_row"](ed.page_no)
             area.queue_draw()
             refresh_title()
 
@@ -940,7 +1002,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         next_b.set_tooltip_text("Next page (PgDn)")
 
         def goto_page(n):
-            n = max(0, min(ed.doc.page_count - 1, n))
+            n = max(0, min(ed.page_count() - 1, n))
             if n != ed.page_no:
                 ed.page_no = n
                 ed.selected = None
@@ -991,9 +1053,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             # Single-page documents get no pager at all; otherwise the
             # impossible direction is greyed out rather than hidden, so the
             # control keeps a stable shape.
-            nav.set_visible(ed.doc.page_count > 1)
+            nav.set_visible(ed.page_count() > 1)
             prev_b.set_sensitive(ed.page_no > 0)
-            next_b.set_sensitive(ed.page_no < ed.doc.page_count - 1)
+            next_b.set_sensitive(ed.page_no < ed.page_count() - 1)
 
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("save-btn")
@@ -1010,10 +1072,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def do_undo():
             mark_self_write()
             was_save = ed.undo()
+            sidebar_api["refresh"]()
             if was_save:
-                refresh_thumbs()
                 render_page()
                 toast("Save reverted — the items are editable ghosts again")
+            else:
+                render_page()
+                toast("Undone")
             area.queue_draw()
             refresh_title()
 
@@ -1021,9 +1086,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             mark_self_write()
             was_save = ed.redo()
             if was_save:
-                refresh_thumbs()
                 render_page()
                 toast("Save re-applied")
+            else:
+                sidebar_api["refresh"]()
+                render_page()
             area.queue_draw()
             refresh_title()
 
@@ -1133,7 +1200,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         )
 
         def share_target():
-            if ed.pending:
+            if ed.pending or ed.page_preview.has_changes():
                 toast("Unsaved changes — Save before sharing")
                 return None
             if flatten_check.get_active():
@@ -1268,28 +1335,40 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             toast_state["timeout"] = GLib.timeout_add(5000, hide)
 
         def on_save(_b):
-            if not ed.pending:
+            markup_ops = ed.to_ops()
+            page_ops = copy.deepcopy(ed.page_preview.page_ops)
+            if not markup_ops and not page_ops:
                 toast("Nothing to save")
                 return
-            ops = ed.to_ops()
             file_before = Path(ed.path).read_bytes()
             pending_before = copy.deepcopy(ed.pending)
+            page_ops_before = copy.deepcopy(ed.page_preview.page_ops)
             ed.doc.close()
+            ed.invalidate_view()
+            ed.page_preview._drop_scratch()
             mark_self_write()
             try:
-                engine.apply(ed.path, ops)
+                for op in page_ops:
+                    engine.apply(ed.path, [op], output=ed.path)
+                if markup_ops:
+                    engine.apply(ed.path, markup_ops, output=ed.path)
             except Exception as exc:  # surface engine errors in the UI
                 toast(f"Save failed: {exc}")
                 ed.doc = pymupdf.open(ed.path)
+                ed.invalidate_view()
+                ed.page_preview.rebuild()
                 render_page()
                 return
             ed.doc = pymupdf.open(ed.path)
-            ed.record_save(file_before, pending_before)
+            ed.page_preview.clear()
+            ed.invalidate_view()
+            ed.record_save(file_before, pending_before, page_ops_before)
             ed.pending.clear()
             ed.selected = None
-            refresh_thumbs()
+            ed.page_no = min(ed.page_no, ed.page_count() - 1)
             render_page()
-            toast(f"Saved {len(ops)} change(s) — Ctrl+Z reverts the save")
+            saved = len(page_ops) + len(markup_ops)
+            toast(f"Saved {saved} change(s) — Ctrl+Z reverts the save")
             celebrate_save()
 
         save_btn.connect("clicked", on_save)
@@ -1322,6 +1401,27 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 render_page()
             elif keyval == Gdk.KEY_F9:
                 side_toggle.set_active(not side_toggle.get_active())
+            elif sidebar_api["sidebar_focus"]["active"] or side_toggle.get_active():
+                if keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace):
+                    sidebar_api["delete_selected_pages"]()
+                    area.queue_draw()
+                    refresh_title()
+                    return True
+                if ctrl and keyval == Gdk.KEY_r and shift:
+                    sidebar_api["rotate_selected"](-90)
+                    area.queue_draw()
+                    refresh_title()
+                    return True
+                if ctrl and keyval == Gdk.KEY_r:
+                    sidebar_api["rotate_selected"](90)
+                    area.queue_draw()
+                    refresh_title()
+                    return True
+                if keyval == Gdk.KEY_b:
+                    sidebar_api["insert_blank_after_current"]()
+                    area.queue_draw()
+                    refresh_title()
+                    return True
             elif ctrl and keyval in (Gdk.KEY_z, Gdk.KEY_Z) and shift:
                 do_redo()
             elif ctrl and keyval == Gdk.KEY_z:
@@ -1343,7 +1443,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif keyval == Gdk.KEY_Home:
                 goto_page(0)
             elif keyval == Gdk.KEY_End:
-                goto_page(ed.doc.page_count - 1)
+                goto_page(ed.page_count() - 1)
             elif ed.selected and keyval in (Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Up, Gdk.KEY_Down):
                 dx = {Gdk.KEY_Left: -step, Gdk.KEY_Right: step}.get(keyval, 0.0)
                 dy = {Gdk.KEY_Up: -step, Gdk.KEY_Down: step}.get(keyval, 0.0)
@@ -1369,37 +1469,24 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # -- thumbnails sidebar -------------------------------------------
 
-        side_list = Gtk.ListBox()
-        side_list.add_css_class("navigation-sidebar")
-
-        def refresh_thumbs():
-            side_list.remove_all()
-            for n in range(ed.doc.page_count):
-                pg = ed.doc[n]
-                s = 120 / pg.rect.width
-                pix = pg.get_pixmap(matrix=pymupdf.Matrix(s, s))
-                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
-                pic = Gtk.Picture.new_for_paintable(texture)
-                pic.set_size_request(120, int(pg.rect.height * s))
-                cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                cell.set_margin_top(6)
-                cell.append(pic)
-                cell.append(Gtk.Label(label=str(n + 1)))
-                side_list.append(cell)
-            select_thumb(ed.page_no)
-
-        def select_thumb(n):
-            row = side_list.get_row_at_index(n)
-            if row:
-                side_list.select_row(row)
-
-        def on_thumb(_lb, row):
-            if row and row.get_index() != ed.page_no:
-                ed.page_no = row.get_index()
+        def on_sidebar_navigate(idx):
+            if idx != ed.page_no:
+                ed.page_no = idx
                 ed.selected = None
                 render_page()
 
-        side_list.connect("row-activated", on_thumb)
+        def on_sidebar_change():
+            ed.invalidate_view()
+            ed.page_no = min(ed.page_no, max(0, ed.page_count() - 1))
+            sidebar_api["refresh"]()
+            render_page()
+            refresh_title()
+
+        sidebar_api = gui_pages.build_page_sidebar(
+            ed, on_sidebar_navigate, on_sidebar_change, toast
+        )
+        win.insert_action_group("page", sidebar_api["actions"])
+        side_list = sidebar_api["widget"]
         side_scroll = Gtk.ScrolledWindow()
         side_scroll.set_child(side_list)
         side_scroll.set_size_request(150, -1)
@@ -1419,10 +1506,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def run_search(term):
             ed.search_term = term
+            doc = ed.viewing_doc()
             ed.search_hits = [
                 (n, rect)
-                for n in range(ed.doc.page_count)
-                for rect in (ed.doc[n].search_for(term) if term else [])
+                for n in range(doc.page_count)
+                for rect in (doc[n].search_for(term) if term else [])
             ]
             ed.search_pos = -1
             if ed.search_hits:
@@ -1545,10 +1633,10 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ed.doc = pymupdf.open(ed.path)
                 except Exception:
                     return False
-                ed.page_no = min(ed.page_no, ed.doc.page_count - 1)
-                refresh_thumbs()
+                ed.page_no = min(ed.page_no, ed.page_count() - 1)
+                ed.page_preview.clear()
                 render_page()
-                if ed.pending:
+                if ed.pending or ed.page_preview.has_changes():
                     toast("Changed on disk — view refreshed; your unsaved items are kept")
                 else:
                     toast("Updated by another program — reloaded")
@@ -1559,8 +1647,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         monitor.connect("changed", on_disk_change)
         win._omapdf_monitor = monitor  # keep the watcher alive
 
-        refresh_thumbs()
-        if ed.doc.page_count > 1:
+        sidebar_api["refresh"]()
+        if ed.page_count() > 1:
             side_toggle.set_active(True)
         render_page()
         if ed.pending:
