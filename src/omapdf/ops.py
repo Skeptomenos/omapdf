@@ -39,6 +39,7 @@ OP_TYPES = (
     "redact",
     "delete_annotation",
     "shape",
+    "crop_pages",
 )
 
 _ROTATE_DEGREES = (90, 180, 270, -90)
@@ -203,6 +204,13 @@ def validate(op: dict) -> dict:
         if not (isinstance(index, int) and index >= 0):
             raise OpError(f"index must be a non-negative integer, got {index!r}")
         out["index"] = index
+
+    elif kind == "crop_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+        out["rect"] = _rect(_require(op, "rect"))
+        x0, y0, x1, y1 = out["rect"]
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            raise OpError("crop_pages rect must have positive width and height")
 
     elif kind == "shape":
         _require(op, "page")

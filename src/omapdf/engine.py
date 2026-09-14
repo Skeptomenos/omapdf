@@ -158,6 +158,44 @@ def _normalize_rotation(degrees: int) -> int:
     return degrees % 360 if degrees >= 0 else (360 + degrees) % 360
 
 
+def _crop_rect_to_absolute(page: pymupdf.Page, rect: list[float]) -> pymupdf.Rect:
+    """Map a crop rect in current page (CropBox) space to absolute PDF coordinates."""
+    user = pymupdf.Rect(rect)
+    base = page.cropbox
+    abs_rect = pymupdf.Rect(
+        base.x0 + user.x0,
+        base.y0 + user.y0,
+        base.x0 + user.x1,
+        base.y0 + user.y1,
+    )
+    clipped = abs_rect & page.mediabox
+    if clipped.is_empty or clipped.width < 1 or clipped.height < 1:
+        raise OpError(
+            f"crop_pages rect {rect} is empty or outside the page mediabox "
+            f"(page size {page.rect.width:.0f}×{page.rect.height:.0f} pt)"
+        )
+    return clipped
+
+
+def _apply_crop_pages(doc, op) -> dict:
+    pages = op["pages"]
+    _validate_page_indices(doc, pages)
+    resolved: list[dict] = []
+    for p in pages:
+        page = doc[p - 1]
+        before = [page.rect.width, page.rect.height]
+        abs_rect = _crop_rect_to_absolute(page, op["rect"])
+        page.set_cropbox(abs_rect)
+        after = [page.rect.width, page.rect.height]
+        resolved.append({
+            "page": p,
+            "cropbox": list(abs_rect),
+            "size_before": before,
+            "size_after": after,
+        })
+    return {"pages": pages, "rect": op["rect"], "resolved": resolved}
+
+
 def _apply_rotate_pages(doc, op) -> dict:
     pages = op["pages"]
     _validate_page_indices(doc, pages)
@@ -408,6 +446,7 @@ _APPLIERS = {
     "place_signature": _apply_place_signature,
     "ink": _apply_ink,
     "shape": _apply_shape,
+    "crop_pages": _apply_crop_pages,
     "rotate_pages": _apply_rotate_pages,
     "delete_pages": _apply_delete_pages,
     "move_pages": _apply_move_pages,

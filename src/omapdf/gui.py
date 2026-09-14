@@ -37,6 +37,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import engine
 from . import gui_pages
+from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
 
@@ -696,7 +697,29 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 _stroke_path(ctx, [ed.live_stroke], ed.pen_color, PEN_WIDTH)
             if ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
-                if ed.tool == "shape":
+                if ed.tool == "crop":
+                    rx0, ry0, rx1, ry1 = (
+                        min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1),
+                    )
+                    pw, ph = ed.page().rect.width, ed.page().rect.height
+                    ctx.set_source_rgba(0, 0, 0, 0.42)
+                    for band in (
+                        (0, 0, pw, ry0),
+                        (0, ry1, pw, ph - ry1),
+                        (0, ry0, rx0, ry1 - ry0),
+                        (rx1, ry0, pw - rx1, ry1 - ry0),
+                    ):
+                        bx, by, bw, bh = band
+                        if bw > 0 and bh > 0:
+                            ctx.rectangle(bx, by, bw, bh)
+                            ctx.fill()
+                    ctx.set_source_rgba(0.2, 0.55, 0.95, 0.95)
+                    ctx.set_line_width(1.6)
+                    ctx.set_dash([6, 4])
+                    ctx.rectangle(rx0, ry0, rx1 - rx0, ry1 - ry0)
+                    ctx.stroke()
+                    ctx.set_dash([])
+                elif ed.tool == "shape":
                     _draw_shape(
                         ctx, ed.shape_kind, x0, y0, x1, y1,
                         ed.pen_color, PEN_WIDTH, alpha=0.85,
@@ -1073,6 +1096,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.rubber = (px, py, px, py)
             elif ed.tool == "shape":
                 ed.rubber = (px, py, px, py)
+            elif ed.tool == "crop":
+                ed.rubber = (px, py, px, py)
             elif ed.tool == "redact":
                 ed.rubber = (px, py, px, py)
             elif ed.tool == "select":
@@ -1092,7 +1117,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed.tool == "pen" and ed.live_stroke is not None:
                 sx, sy = ed.live_stroke[0]
                 ed.live_stroke.append((sx + pdx, sy + pdy))
-            elif ed.tool in ("highlight", "redact", "shape") and ed.rubber:
+            elif ed.tool in ("highlight", "redact", "shape", "crop") and ed.rubber:
                 x0, y0, _, _ = ed.rubber
                 ed.rubber = (x0, y0, x0 + pdx, y0 + pdy)
             elif (
@@ -1130,6 +1155,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                         "x0": x0, "y0": y0, "x1": x1, "y1": y1,
                         "color": list(ed.pen_color), "width": PEN_WIDTH,
                     })
+            if ed.tool == "crop" and ed.rubber:
+                x0, y0, x1, y1 = ed.rubber
+                if abs(x1 - x0) > 3 and abs(y1 - y0) > 3:
+                    crop = [
+                        min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1),
+                    ]
+                    ed.checkpoint()
+                    transform_pending_for_crop(ed.pending, ed.page_no, crop)
+                    ed.page_preview.add_crop_pages([ed.page_no + 1], crop)
+                    ed.invalidate_view()
+                    on_sidebar_change()
+                    toast("Crop not applied until Save")
             if ed.tool == "redact" and ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
                 if abs(x1 - x0) > 3 and abs(y1 - y0) > 3:
@@ -1329,6 +1366,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ctx.line_to(13.5, 4.5)
             ctx.stroke()
 
+        def paint_crop(ctx, fg):
+            _ink(ctx, fg, 1.6)
+            ctx.rectangle(3.0, 3.5, 15.0, 12.5)
+            ctx.stroke()
+            for hx, hy in ((3, 3.5), (15, 3.5), (3, 12.5), (15, 12.5)):
+                ctx.rectangle(hx - 1.2, hy - 1.2, 2.4, 2.4)
+                ctx.stroke()
+
         def make_tool(name, tip, painter):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
@@ -1468,6 +1513,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 shape_pop.popup()
 
         shape_btn.connect("clicked", on_shape_clicked)
+        make_tool(
+            "crop",
+            "Crop page — drag the region to keep (CropBox; applies on Save)",
+            paint_crop,
+        )
+        tool_sep()
         redact_btn = make_tool(
             "redact",
             "Redact — drag over text (tap again for free-rectangle mode)",
