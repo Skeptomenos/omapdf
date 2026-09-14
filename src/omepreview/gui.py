@@ -43,6 +43,14 @@ from . import gui_pages
 from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
+from .view_gestures import (
+    current_zoom_pct,
+    parse_signature_dnd,
+    pinch_live_pct,
+    pinch_pixmap_scale,
+    signature_dnd_payload,
+    signature_ghost,
+)
 from .window_controls import window_controls_enabled
 
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
@@ -230,6 +238,19 @@ box.omapdf-overlay-toolbar .zoom-indicator {{
   letter-spacing: 0.02em;
   opacity: 0.62;
 }}
+button.omapdf-sig-card {{
+  padding: 8px 10px;
+  border-radius: 0;
+  min-width: 168px;
+}}
+button.omapdf-sig-card label {{
+  font-family: monospace;
+  font-size: 10.5px;
+  opacity: 0.62;
+}}
+box.omapdf-sig-actions {{
+  min-width: 280px;
+}}
 label.toast-banner {{
   background: @theme_fg_color;
   color: @theme_bg_color;
@@ -335,6 +356,14 @@ box.omapdf-overlay-toolbar menubutton.tool-icon > button {
   min-width: 28px;
   min-height: 28px;
 }
+box.omapdf-overlay-toolbar box.omapdf-rail-row {
+  margin: 0;
+}
+box.omapdf-overlay-toolbar box.omapdf-rail-row > button.tool-slim {
+  margin: 1px 0;
+  min-width: 20px;
+  padding: 5px 2px;
+}
 box.omapdf-overlay-toolbar button.omapdf-ghost {
   background: transparent;
   background-image: none;
@@ -409,6 +438,7 @@ class Editor:
         self.pen_color = PEN_COLORS[1][1]
         self.shape_kind = "rect"
         self.zoom_pct: float | None = None  # None = fit page in viewport
+        self.pinch_live_scale = 1.0  # cairo extra scale while pinching
         self.page_origin = (0.0, 0.0)  # paper top-left in view pixels
         self.paper_px = (0, 0)  # paper width/height in view pixels
         self.search_term = ""
@@ -779,6 +809,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         }
 
         area = Gtk.DrawingArea()
+        area.set_can_target(True)
         sidebar_api = {
             "refresh": lambda: None,
             "highlight_current": lambda _n: None,
@@ -842,6 +873,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             return (ox + px * ed.zoom, oy + py * ed.zoom)
 
         def render_page():
+            ed.pinch_live_scale = 1.0
             if ed.zoom_pct is None:
                 z = fit_page_zoom()
             else:
@@ -887,6 +919,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if pw > 0 and ph > 0:
                 folio = f"{Path(ed.path).name} · {ed.page_count()} pages"
                 _draw_folio(ctx, folio, ox, oy - 13, fg, 0.5)
+                live = ed.pinch_live_scale
+                if live != 1.0:
+                    fx = ox + pw / 2
+                    fy = oy + ph / 2
+                    ctx.translate(fx, fy)
+                    ctx.scale(live, live)
+                    ctx.translate(-fx, -fy)
                 _draw_paper_shadow(ctx, ox, oy, pw, ph, chrome["shadows"])
                 ctx.set_source_rgb(1, 1, 1)
                 ctx.rectangle(ox, oy, pw, ph)
@@ -1265,13 +1304,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed._ensure_sig(name) is None:
                 return False
             ed.checkpoint()
-            w = 160.0
-            aspect = ed.sig_aspect(name)
-            item = {
-                "kind": "sig", "page": ed.page_no,
-                "x": px - w / 2, "y": py - w * aspect / 2,
-                "w": w, "h": w * aspect, "date": False, "signature": name,
-            }
+            item = signature_ghost(
+                ed.page_no, name, px, py, ed.sig_aspect(name),
+            )
             ed.pending.append(item)
             ed.selected = item
             set_tool("select")
@@ -1295,6 +1330,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 else:
                     prompt_note(px, py)
             elif ed.tool == "sign":
+                if sig_drag["active"] or sig_drag["just_dropped"]:
+                    return
                 name = ed.sig_name
                 if ed._ensure_sig(name) is None:
                     names = sig_store.list_names()
@@ -1335,18 +1372,68 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         click.connect("pressed", on_click)
         area.add_controller(click)
 
+        sig_drag = {"active": False, "just_dropped": False}
+
+        def _sig_content_provider(name: str) -> Gdk.ContentProvider:
+            payload = signature_dnd_payload(name)
+            try:
+                value = GObject.Value(GObject.TYPE_STRING, payload)
+                providers = [Gdk.ContentProvider.new_for_value(value)]
+            except (TypeError, ValueError):
+                providers = [Gdk.ContentProvider.new_for_value(payload)]
+            try:
+                path = sig_store.get(name)
+                providers.append(
+                    Gdk.ContentProvider.new_for_value(
+                        Gio.File.new_for_path(str(path))
+                    )
+                )
+            except (FileNotFoundError, TypeError, ValueError):
+                pass
+            if len(providers) == 1:
+                return providers[0]
+            try:
+                return Gdk.ContentProvider.new_union(providers)
+            except (TypeError, ValueError):
+                return providers[0]
+
+        def drop_signature_at(value, widget, x, y) -> bool:
+            name = parse_signature_dnd(value)
+            if not name:
+                return False
+            if widget is not area:
+                ok, x, y = widget.translate_coordinates(area, x, y)
+                if not ok:
+                    return False
+            px, py = to_page_point(x, y)
+            placed = place_named_signature(name, px, py)
+            if placed:
+                sig_drag["just_dropped"] = True
+
+                def clear_drop_flag():
+                    sig_drag["just_dropped"] = False
+                    return False
+
+                GLib.idle_add(clear_drop_flag)
+                sign_pop.popdown()
+            return placed
+
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
+        drop.set_preload(True)
 
         def on_sig_drop(_target, value, x, y):
-            text = str(value)
-            if not text.startswith("omepreview-sig:"):
-                return False
-            name = text.split(":", 1)[1]
-            px, py = to_page_point(x, y)
-            return place_named_signature(name, px, py)
+            return drop_signature_at(value, area, x, y)
 
         drop.connect("drop", on_sig_drop)
         area.add_controller(drop)
+
+        file_drop = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
+        file_drop.set_preload(True)
+        file_drop.connect(
+            "drop",
+            lambda _t, value, x, y: drop_signature_at(value, area, x, y),
+        )
+        area.add_controller(file_drop)
 
         # Hovering a note/text (pending or saved) previews its content.
         area.set_has_tooltip(True)
@@ -1374,6 +1461,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         drag = Gtk.GestureDrag()
 
         def on_drag_begin(_g, sx, sy):
+            if sig_drag["active"] or sig_drag["just_dropped"]:
+                return
             px, py = to_page_point(sx, sy)
             if ed.tool == "pen":
                 ed.live_stroke = [(px, py)]
@@ -1770,11 +1859,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         sign_pop.set_parent(sign_btn)
         sign_pop.set_position(Gtk.PositionType.LEFT)
         sign_pop.set_autohide(True)
-        sign_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        sign_box.set_margin_top(8)
-        sign_box.set_margin_bottom(8)
-        sign_box.set_margin_start(8)
-        sign_box.set_margin_end(8)
+        sign_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        sign_box.set_margin_top(10)
+        sign_box.set_margin_bottom(10)
+        sign_box.set_margin_start(10)
+        sign_box.set_margin_end(10)
         sign_pop.set_child(sign_box)
 
         def _clear_box(box):
@@ -1783,6 +1872,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 nxt = child.get_next_sibling()
                 box.remove(child)
                 child = nxt
+
+        def _sig_thumb_size() -> tuple[int, int]:
+            return (168, 72)
 
         def rebuild_sign_popover():
             _clear_box(sign_box)
@@ -1793,56 +1885,98 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 empty.set_wrap(True)
                 empty.set_xalign(0)
                 sign_box.append(empty)
-            for name in names:
-                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                row.set_margin_top(2)
-                row.set_margin_bottom(2)
-                thumb = Gtk.DrawingArea()
-                thumb.set_content_width(96)
-                thumb.set_content_height(36)
-                surface = ed._ensure_sig(name)
+            else:
+                gallery = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+                gallery.set_valign(Gtk.Align.START)
+                tw, th = _sig_thumb_size()
+                for name in names:
+                    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                    thumb = Gtk.DrawingArea()
+                    thumb.set_content_width(tw)
+                    thumb.set_content_height(th)
+                    thumb.set_can_target(False)
+                    surface = ed._ensure_sig(name)
 
-                def paint_thumb(_a, ctx, w, h, surf=surface, selected=(name == ed.sig_name)):
-                    ctx.set_source_rgb(1, 1, 1)
-                    ctx.paint()
-                    if selected:
-                        ctx.set_source_rgb(0.15, 0.45, 0.95)
-                        ctx.set_line_width(1.5)
-                        ctx.rectangle(0.75, 0.75, w - 1.5, h - 1.5)
-                        ctx.stroke()
-                    if surf is None:
-                        return
-                    scale = min(w / max(surf.get_width(), 1), h / max(surf.get_height(), 1))
-                    dw, dh = surf.get_width() * scale, surf.get_height() * scale
-                    ctx.translate((w - dw) / 2, (h - dh) / 2)
-                    ctx.scale(scale, scale)
-                    ctx.set_source_surface(surf, 0, 0)
-                    ctx.paint()
+                    def paint_thumb(_a, ctx, w, h, surf=surface, n=name):
+                        ctx.set_source_rgb(1, 1, 1)
+                        ctx.paint()
+                        if n == ed.sig_name:
+                            ctx.set_source_rgb(*SELECT_COLOR)
+                            ctx.set_line_width(1.5)
+                            ctx.rectangle(0.75, 0.75, w - 1.5, h - 1.5)
+                            ctx.stroke()
+                        if surf is None:
+                            return
+                        scale = min(
+                            (w - 8) / max(surf.get_width(), 1),
+                            (h - 8) / max(surf.get_height(), 1),
+                        )
+                        dw, dh = surf.get_width() * scale, surf.get_height() * scale
+                        ctx.translate((w - dw) / 2, (h - dh) / 2)
+                        ctx.scale(scale, scale)
+                        ctx.set_source_surface(surf, 0, 0)
+                        ctx.paint()
 
-                thumb.set_draw_func(paint_thumb)
-                label = Gtk.Label(label=name, xalign=0)
-                label.set_hexpand(True)
-                row.append(thumb)
-                row.append(label)
-                drag = Gtk.DragSource()
-                drag.set_actions(Gdk.DragAction.COPY)
+                    thumb.set_draw_func(paint_thumb)
+                    label = Gtk.Label(label=name)
+                    label.set_can_target(False)
+                    label.set_wrap(True)
+                    label.set_max_width_chars(16)
+                    label.set_justify(Gtk.Justification.CENTER)
+                    label.set_xalign(0.5)
+                    inner.append(thumb)
+                    inner.append(label)
+                    card = Gtk.Button()
+                    card.add_css_class("flat")
+                    card.add_css_class("omapdf-sig-card")
+                    card.set_child(inner)
+                    card.set_tooltip_text(f"Drag {name} onto the page")
 
-                def on_prepare(_src, _x, _y, n=name):
-                    return Gdk.ContentProvider.new_for_value(f"omepreview-sig:{n}")
+                    def on_pick(_b, n=name):
+                        if sig_drag["active"]:
+                            return
+                        ed.sig_name = n
+                        set_tool("sign")
+                        gallery_child = gallery.get_first_child()
+                        while gallery_child is not None:
+                            gallery_child.queue_draw()
+                            gallery_child = gallery_child.get_next_sibling()
 
-                drag.connect("prepare", on_prepare)
-                row.add_controller(drag)
-                pick = Gtk.GestureClick()
+                    card.connect("clicked", on_pick)
+                    drag = Gtk.DragSource()
+                    drag.set_actions(Gdk.DragAction.COPY)
 
-                def on_pick(_g, _n, _x, _y, n=name):
-                    ed.sig_name = n
-                    set_tool("sign")
-                    rebuild_sign_popover()
+                    def on_prepare(_src, _x, _y, n=name):
+                        return _sig_content_provider(n)
 
-                pick.connect("pressed", on_pick)
-                row.add_controller(pick)
-                sign_box.append(row)
-            rec = Gtk.Button(label="Record new…")
+                    def on_drag_begin(_src, _drag, n=name):
+                        sig_drag["active"] = True
+                        sign_pop.set_autohide(False)
+                        ed.sig_name = n
+                        set_tool("sign")
+
+                    def on_drag_end(_src, _drag, _delete):
+                        sig_drag["active"] = False
+                        sign_pop.set_autohide(True)
+                        sign_pop.popdown()
+
+                    drag.connect("prepare", on_prepare)
+                    drag.connect("drag-begin", on_drag_begin)
+                    drag.connect("drag-end", on_drag_end)
+                    card.add_controller(drag)
+                    gallery.append(card)
+                gallery_scroll = Gtk.ScrolledWindow()
+                gallery_scroll.set_policy(
+                    Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER
+                )
+                gallery_scroll.set_propagate_natural_width(True)
+                gallery_scroll.set_propagate_natural_height(True)
+                gallery_scroll.set_max_content_width(520)
+                gallery_scroll.set_child(gallery)
+                sign_box.append(gallery_scroll)
+            actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            actions.add_css_class("omapdf-sig-actions")
+            rec = Gtk.Button(label="Record new")
             rec.add_css_class("suggested-action")
 
             def on_record(_b):
@@ -1850,18 +1984,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 record_signature(next_sig_name())
 
             rec.connect("clicked", on_record)
-            sign_box.append(rec)
+            actions.append(rec)
             if names:
-                rer = Gtk.Button(label=f"Re-record {ed.sig_name!r}…")
+                rer = Gtk.Button(label=f"Re-record '{ed.sig_name}'")
 
                 def on_rerecord(_b, n=ed.sig_name):
                     sign_pop.popdown()
                     record_signature(n)
 
                 rer.connect("clicked", on_rerecord)
-                sign_box.append(rer)
+                actions.append(rer)
+            sign_box.append(actions)
             hint = Gtk.Label(
-                label="Select one, then drag it onto the page. Space/Enter in the recorder.",
+                label="Drag a signature onto the page, or click the page to place it.",
                 wrap=True,
                 xalign=0,
             )
@@ -2038,10 +2173,16 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         goto_entry.connect("activate", on_goto)
 
-        nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        nav.append(prev_b)
+        nav_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        nav_btns.add_css_class("omapdf-rail-row")
+        nav_btns.set_halign(Gtk.Align.CENTER)
+        nav_btns.append(prev_b)
+        nav_btns.append(next_b)
+        nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        nav.add_css_class("omapdf-rail-nav")
+        nav.set_halign(Gtk.Align.CENTER)
         nav.append(page_btn)
-        nav.append(next_b)
+        nav.append(nav_btns)
 
         def update_nav():
             # Single-page documents get no pager at all; otherwise the
@@ -2267,7 +2408,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         save_style_hook["fn"] = refresh_save_style
 
-        for w in (side_toggle, search_btn):
+        for w in (side_toggle, search_btn, ask_btn):
             toolbar.append(w)
         rail_sep()
         for w in (
@@ -2277,13 +2418,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         ):
             toolbar.append(w)
         rail_sep()
-        for w in (zoom_btn, undo_b, redo_b):
-            toolbar.append(w)
+        undo_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        undo_row.add_css_class("omapdf-rail-row")
+        undo_row.set_halign(Gtk.Align.CENTER)
+        undo_row.append(undo_b)
+        undo_row.append(redo_b)
+        toolbar.append(zoom_btn)
+        toolbar.append(undo_row)
         toolbar.append(nav)
         bottom_spacer = Gtk.Box()
         bottom_spacer.set_vexpand(True)
         toolbar.append(bottom_spacer)
-        for w in (ask_btn, share_btn, save_btn):
+        for w in (share_btn, save_btn):
             toolbar.append(w)
 
         toolbar.set_vexpand(True)
@@ -2714,28 +2860,63 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         scroller.add_controller(scroll_ctl)
 
         pinch = Gtk.GestureZoom.new()
-        pinch_state = {"start_pct": None}
+        pinch.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        pinch_state = {"start_pct": None, "live_pct": None, "commit_id": 0}
+
+        def pinch_committed_pct() -> float:
+            return current_zoom_pct(ed.zoom_pct, ed.zoom)
 
         def on_pinch_begin(_gesture, _seq):
-            pinch_state["start_pct"] = (
-                ed.zoom_pct if ed.zoom_pct is not None
-                else ed.zoom / (96 / 72) * 100
-            )
+            if pinch_state["commit_id"]:
+                GLib.source_remove(pinch_state["commit_id"])
+                pinch_state["commit_id"] = 0
+            start = pinch_committed_pct()
+            pinch_state["start_pct"] = start
+            pinch_state["live_pct"] = start
+            ed.pinch_live_scale = 1.0
 
         def on_pinch(_gesture, scale):
             start = pinch_state["start_pct"]
             if start is None:
                 return
-            ed.zoom_pct = max(25.0, min(400.0, start * scale))
+            live = pinch_live_pct(start, scale)
+            pinch_state["live_pct"] = live
+            ed.pinch_live_scale = pinch_pixmap_scale(start, live)
+            zoom_dot.set_text(f"{int(live)}%")
+            area.queue_draw()
+
+        def commit_pinch_zoom():
+            pinch_state["commit_id"] = 0
+            live = pinch_state["live_pct"]
+            pinch_state["start_pct"] = None
+            pinch_state["live_pct"] = None
+            if live is None:
+                ed.pinch_live_scale = 1.0
+                return False
+            ed.zoom_pct = live
             render_page()
+            return False
 
         def on_pinch_end(_gesture, _seq):
-            pinch_state["start_pct"] = None
+            if pinch_state["start_pct"] is None and pinch_state["live_pct"] is None:
+                return
+            if pinch_state["commit_id"]:
+                GLib.source_remove(pinch_state["commit_id"])
+            pinch_state["commit_id"] = GLib.idle_add(commit_pinch_zoom)
 
         pinch.connect("begin", on_pinch_begin)
         pinch.connect("scale-changed", on_pinch)
         pinch.connect("end", on_pinch_end)
+        pinch.connect("cancel", on_pinch_end)
         scroller.add_controller(pinch)
+
+        scroller_drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
+        scroller_drop.set_preload(True)
+        scroller_drop.connect(
+            "drop",
+            lambda _t, value, x, y: drop_signature_at(value, scroller, x, y),
+        )
+        scroller.add_controller(scroller_drop)
 
         # Keep fit-page honest when the viewport changes — sidebar sliding
         # in or out, window resizes. Debounced so the revealer animation
@@ -2743,6 +2924,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         fit_state = {"pending": False}
 
         def on_viewport_change(_adj, _p):
+            if pinch_state["start_pct"] is not None:
+                return
             if ed.zoom_pct is not None or fit_state["pending"]:
                 return
             fit_state["pending"] = True
