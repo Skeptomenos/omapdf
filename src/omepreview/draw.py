@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Signature drawing window (GTK4).
 
-The window *is* the trackpad: a rounded pad surface. Space arms recording
-and grabs the pointer so finger motion maps onto that pad (a click is not
-required). Enter writes SVG. Space while recording/recorded clears and
-starts over. `--click` is mouse click-and-drag fallback only.
+The window *is* the trackpad: a rounded pad surface. Space arms recording.
+While armed, the physical pad is read as an absolute 2D surface (evdev
+ABS_MT_POSITION_* / ABS_X/Y) and mapped onto the on-screen pad. A click is
+not required. Finger up ends a stroke; a new contact starts at that abs
+location. Relative pointer motion is fallback only when no abs axes can be
+opened. Enter writes SVG. Space while recording/recorded clears and starts
+over. `--click` is mouse click-and-drag fallback only.
 
 Runs under system python when the venv lacks PyGObject; callers use draw.run().
 """
@@ -19,7 +22,17 @@ import tempfile
 from pathlib import Path
 
 from . import signature as sig_store
+from .abs_pad import AbsPadWatcher, probe_abs_touchpad
 from .trackpad_sig import RecorderSession, STROKE_WIDTH, stroke_mode_label
+
+
+def legacy_event_usable(event) -> bool:
+    """GTK EventControllerLegacy sometimes delivers event=None.
+
+    Guard before reading event.type — do not print a traceback per motion.
+    """
+    return event is not None and getattr(event, "type", None) is not None
+
 
 # On-screen pad, including the aluminum bezel. Glass is inset.
 PAD_W, PAD_H = 560, 380
@@ -80,7 +93,9 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
     session = RecorderSession(click_mode=click_mode, pad_size=(glass_w, glass_h))
     saved = False
     grab_release = lambda: None
+    abs_stop = lambda: None
     idle_stroke_id = 0
+    abs_denied = False
 
     def glass_rect():
         return BEZEL, BEZEL, glass_w, glass_h
@@ -108,6 +123,8 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
                     armed=session.armed,
                     click_mode=click_mode,
                     has_ink=session.has_ink(),
+                    abs_mode=session.abs_active,
+                    abs_denied=abs_denied,
                 )
             )
         if status is not None:
@@ -115,22 +132,74 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
                 status.set_text("Press Space to start")
             elif session.has_ink():
                 status.set_text("Recording — Enter saves")
+            elif session.abs_active:
+                status.set_text("Recording — finger on the pad draws there")
+            elif abs_denied:
+                status.set_text("Recording — relative fallback (need input group)")
             else:
                 status.set_text("Recording — move on the trackpad")
+
+    def cancel_idle():
+        nonlocal idle_stroke_id
+        if idle_stroke_id:
+            GLib.source_remove(idle_stroke_id)
+            idle_stroke_id = 0
+
+    def stop_abs():
+        nonlocal abs_stop
+        abs_stop()
+        abs_stop = lambda: None
+        session.abs_active = False
+
+    def start_abs_reader() -> bool:
+        nonlocal abs_stop, abs_denied
+        stop_abs()
+        probe = probe_abs_touchpad()
+        abs_denied = probe.permission_denied
+        if probe.device is None:
+            return False
+        device = probe.device
+
+        def on_contacts(contacts):
+            for ev in contacts:
+                if ev.kind == "up":
+                    session.apply_abs("up")
+                elif ev.x is not None and ev.y is not None:
+                    gx, gy = device.map_point(ev.x, ev.y, glass_w, glass_h)
+                    session.apply_abs(ev.kind, gx, gy)
+            redraw()
+
+        from gi.repository import GLib
+
+        watcher = AbsPadWatcher(device, on_contacts, idle_add=GLib.idle_add)
+        watcher.start()
+        abs_stop = watcher.stop
+        session.abs_active = True
+        session.mapper.absolute = True
+        return True
 
     def arm_recording():
         nonlocal grab_release
         grab_release()
+        grab_release = lambda: None
+        cancel_idle()
+        stop_abs()
         session.handle_space()
-        release, confined = _grab_pointer(win, area)
-        grab_release = release
-        session.mapper.absolute = confined
+        if not click_mode and start_abs_reader():
+            grab_release = _hide_cursor(win, area)
+            session.grab_pointer = False
+        else:
+            release, confined = _grab_pointer(win, area)
+            grab_release = release
+            session.mapper.absolute = confined
         redraw()
 
     def release_grab():
         nonlocal grab_release
         grab_release()
         grab_release = lambda: None
+        cancel_idle()
+        stop_abs()
         session.grab_pointer = False
 
     def schedule_idle_end():
@@ -148,6 +217,10 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
 
     def on_motion_coords(x: float, y: float, *, button1: bool):
         if not session.armed:
+            return
+        if session.abs_active:
+            # Absolute pad owns inking; relative cursor must not continue
+            # a stroke from the last (x, y) after a finger lift.
             return
         on_pad = in_glass(x, y)
         if session.mapper.absolute and on_pad:
@@ -235,6 +308,10 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
         legacy.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
         def on_legacy(_ctrl, event):
+            if not legacy_event_usable(event):
+                return False
+            if session.abs_active:
+                return False
             et = event.type
             if et in (Gdk.EventType.TOUCH_END, Gdk.EventType.BUTTON_RELEASE):
                 session.end_stroke()
@@ -291,10 +368,23 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
                 session.armed = os.environ.get("OMEPREVIEW_SIG_DEMO", "1") != "0"
                 session.grab_pointer = False
                 if session.armed:
-                    for i in range(0, 220):
-                        x = 36 + i * 1.7
-                        y = 150 + 28 * ((i % 40) / 20 - 1) ** 2 + i * 0.12
-                        session.add_point(x, y, button1=False)
+                    # Two disconnected strokes (finger lift, then a new abs contact).
+                    session.apply_abs("down", 48, 160)
+                    for i in range(1, 90):
+                        session.apply_abs(
+                            "move",
+                            48 + i * 1.6,
+                            160 + 22 * ((i % 30) / 15 - 1) ** 2,
+                        )
+                    session.apply_abs("up")
+                    session.apply_abs("down", 280, 90)
+                    for i in range(1, 70):
+                        session.apply_abs(
+                            "move",
+                            280 + i * 1.4,
+                            90 + 18 * ((i % 24) / 12 - 1) ** 2 + i * 0.2,
+                        )
+                    session.apply_abs("up")
                 redraw()
 
                 def dump():
@@ -313,7 +403,9 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
         status = Gtk.Label(label="Press Space to start")
         status.add_css_class("title-4")
         hint = Gtk.Label(
-            label=stroke_mode_label(armed=False, click_mode=click_mode)
+            label=stroke_mode_label(
+                armed=False, click_mode=click_mode, abs_denied=abs_denied
+            )
         )
         hint.add_css_class("dim-label")
         hint.set_wrap(True)
@@ -425,40 +517,54 @@ def _install_css():
     )
 
 
-def _grab_pointer(win, area) -> tuple:
-    """Confine the pointer to the pad window while recording (X11).
-
-    GTK 4 removed gdk_seat_grab. On X11 we XGrabPointer + confine_to the
-    window so the OS cursor cannot wander the desktop. Returns
-    (release_callable, confined). Wayland: hide the window cursor and rely
-    on relative mapping.
-    """
+def _hide_cursor(win, area):
+    """Hide the OS cursor over the pad window. Returns a restore callable."""
     from gi.repository import Gdk
 
     native = win.get_native() if win is not None else None
     surface = native.get_surface() if native is not None else None
     if surface is None:
-        return (lambda: None, False)
-
-    blank = Gdk.Cursor.new_from_name("none")
+        return lambda: None
     try:
+        blank = Gdk.Cursor.new_from_name("none")
         surface.set_cursor(blank)
         if area is not None:
             area.set_cursor(blank)
     except Exception:
-        pass
+        return lambda: None
 
-    ungrab_x = _x11_grab_pointer(surface)
-
-    def release():
-        if ungrab_x:
-            ungrab_x()
+    def restore():
         try:
             surface.set_cursor(None)
             if area is not None:
                 area.set_cursor(None)
         except Exception:
             pass
+
+    return restore
+
+
+def _grab_pointer(win, area) -> tuple:
+    """Confine the pointer to the pad window while recording (X11).
+
+    Used only as relative-pointer fallback when no abs touchpad can be
+    opened. GTK 4 removed gdk_seat_grab. On X11 we XGrabPointer + confine_to
+    the window. Returns (release_callable, confined). Wayland: hide the
+    window cursor; relative deltas keep ink on the pad.
+    """
+    restore_cursor = _hide_cursor(win, area)
+
+    native = win.get_native() if win is not None else None
+    surface = native.get_surface() if native is not None else None
+    if surface is None:
+        return (restore_cursor, False)
+
+    ungrab_x = _x11_grab_pointer(surface)
+
+    def release():
+        if ungrab_x:
+            ungrab_x()
+        restore_cursor()
 
     return release, ungrab_x is not None
 

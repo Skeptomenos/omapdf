@@ -5,7 +5,9 @@ moving* draws; a click / press-down is not required. Hover-in-air is not
 the model. Space again clears and re-records. Enter saves SVG.
 
 Linux laptop pads already move the pointer without BUTTON1. While armed,
-that motion is ink. `--click` is mouse click-and-drag fallback only.
+ink comes from the touchpad's absolute axes (evdev) when they can be
+opened; relative pointer deltas are fallback only. `--click` is mouse
+click-and-drag fallback only.
 """
 
 from __future__ import annotations
@@ -42,6 +44,8 @@ def stroke_mode_label(
     armed: bool,
     click_mode: bool = False,
     has_ink: bool = False,
+    abs_mode: bool = False,
+    abs_denied: bool = False,
 ) -> str:
     if click_mode:
         if not armed:
@@ -49,14 +53,34 @@ def stroke_mode_label(
         if has_ink:
             return "Enter to save · Space clears and re-records"
         return "Click and drag on the pad · Enter saves · Space restarts"
+    if abs_denied and not abs_mode:
+        if not armed:
+            return (
+                "Space to record · relative pointer fallback — add your user "
+                "to the input group for absolute pad mapping · Enter to save"
+            )
+        if has_ink:
+            return "Enter to save · Space clears and starts over"
+        return (
+            "Relative pointer fallback (need /dev/input) — ink follows "
+            "without clicking · Enter saves"
+        )
     if not armed:
         return (
             "Space to record · rest a finger on the trackpad and move "
-            "(no click) · Enter to save"
+            "(no click) · lift ends a stroke · Enter to save"
         )
     if has_ink:
         return "Enter to save · Space clears and starts over"
-    return "Move on the trackpad — ink follows without clicking · Enter saves"
+    if abs_mode:
+        return (
+            "Finger on the pad draws at that spot — ink follows without "
+            "clicking · lift ends a stroke · Enter saves"
+        )
+    return (
+        "Move on the trackpad — ink follows without clicking · lift ends "
+        "a stroke · Enter saves"
+    )
 
 
 class PadMapper:
@@ -112,6 +136,7 @@ class RecorderSession:
         self.pad_w, self.pad_h = float(pad_size[0]), float(pad_size[1])
         self.armed = False
         self.grab_pointer = False
+        self.abs_active = False
         self.strokes: list[list[tuple[float, float]]] = []
         self.drawing = False
         self.mapper = PadMapper(self.pad_w, self.pad_h)
@@ -126,6 +151,7 @@ class RecorderSession:
         self.mapper.reset()
         self.armed = True
         self.grab_pointer = True
+        self.abs_active = False
 
     def handle_enter(self) -> bool:
         """True when the session has ink to save. Disarms after a successful save."""
@@ -139,6 +165,31 @@ class RecorderSession:
     def end_stroke(self) -> None:
         self.drawing = False
         self.mapper.last = None
+
+    def apply_abs(
+        self,
+        kind: str,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> bool:
+        """Contact from an absolute pad. `kind` is down / move / up.
+
+        Finger up ends the stroke (no connecting line). Finger down at a
+        new abs location starts a disconnected stroke at that mapped point.
+        """
+        if not self.armed or self.click_mode:
+            return False
+        if kind == "up":
+            self.end_stroke()
+            return True
+        if x is None or y is None:
+            return False
+        px = _clamp(float(x), 0.0, self.pad_w)
+        py = _clamp(float(y), 0.0, self.pad_h)
+        if kind == "down":
+            self.end_stroke()
+            return self.add_point(px, py, button1=False)
+        return self.add_point(px, py, button1=False)
 
     def add_point(self, x: float, y: float, *, button1: bool = False) -> bool:
         """Append a pad-local point. Returns True if captured."""

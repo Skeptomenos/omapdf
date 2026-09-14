@@ -115,7 +115,7 @@ show-in-folder).
   the copy is going to someone else; keep the unflattened version.
 - Password-protected PDFs are refused — ask the user to decrypt.
 - No signature saved? `omepreview sig draw` opens the trackpad recorder
-  (Space / finger-glide / Enter → SVG). Never fabricate a signature, never
+  (Space / finger-on-pad absolute mapping / Enter → SVG). Never fabricate a signature, never
   sign unbidden, never invent form data.
 - Visual signing only; cryptographic (certificate) signing is on the
   roadmap — say so, don't improvise it.

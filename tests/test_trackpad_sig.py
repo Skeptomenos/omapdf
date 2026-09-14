@@ -112,3 +112,58 @@ def test_pad_mapper_absolute_uses_glass_coords():
     mapper.absolute = True
     point = mapper.feed(40, 30, on_glass=True)
     assert point == (40, 30)
+
+
+def test_none_legacy_event_is_ignored():
+    from omepreview.draw import legacy_event_usable
+
+    assert not legacy_event_usable(None)
+
+    class _NoType:
+        pass
+
+    assert not legacy_event_usable(_NoType())
+
+    class _HasType:
+        type = 1
+
+    assert legacy_event_usable(_HasType())
+
+
+def test_contact_up_ends_stroke():
+    session = RecorderSession()
+    session.handle_space()
+    assert session.apply_abs("down", 10, 10)
+    assert session.apply_abs("move", 24, 14)
+    assert session.drawing
+    assert session.has_ink()
+    assert session.apply_abs("up")
+    assert not session.drawing
+    assert session.has_ink()
+
+
+def test_new_contact_at_different_abs_starts_disconnected_stroke():
+    session = RecorderSession(pad_size=(200.0, 100.0))
+    session.handle_space()
+    session.apply_abs("down", 12, 18)
+    session.apply_abs("move", 40, 22)
+    session.apply_abs("up")
+    session.apply_abs("down", 160, 80)
+    session.apply_abs("move", 170, 70)
+    session.apply_abs("up")
+    inked = [s for s in session.strokes if len(s) >= 2]
+    assert len(inked) == 2
+    first, second = inked
+    assert first[0] == (12.0, 18.0)
+    assert second[0] == (160.0, 80.0)
+    # No connecting segment from the last ink point to the new contact.
+    assert abs(first[-1][0] - second[0][0]) > 80
+    svg = strokes_to_svg(session.strokes)
+    assert svg.count("M ") == 2
+
+
+def test_click_mode_ignores_abs_contacts():
+    session = RecorderSession(click_mode=True)
+    session.handle_space()
+    assert not session.apply_abs("down", 10, 10)
+    assert not session.has_ink()
