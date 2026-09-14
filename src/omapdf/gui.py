@@ -42,6 +42,7 @@ from . import gui_pages
 from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
+from .window_controls import window_controls_enabled
 
 CHECK = [[(0.0, 7.0), (4.5, 12.0), (14.0, 0.0)]]
 CROSS = [[(0.0, 0.0), (12.0, 12.0)], [(12.0, 0.0), (0.0, 12.0)]]
@@ -328,6 +329,25 @@ listbox.omapdf-thumbs row.omapdf-thumb-inserted label {{
   opacity: 0.62;
 }}
 """.encode()
+
+WINDOW_CONTROLS_CSS = b"""
+headerbar.omapdf-window-controls {
+  min-height: 28px;
+  padding: 0 4px;
+  border: none;
+  box-shadow: none;
+}
+headerbar.omapdf-window-controls button.titlebutton {
+  border-radius: 6px;
+  min-width: 26px;
+  min-height: 22px;
+  margin: 2px;
+  padding: 2px 4px;
+}
+window.omapdf-editor.omapdf-window-controls-on {
+  border-radius: 0;
+}
+"""
 
 
 def _png_surface(path: str) -> cairo.ImageSurface:
@@ -701,7 +721,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
     def on_activate(app):
         win = Gtk.ApplicationWindow(application=app)
         win.set_default_size(980, 900)
-        win.set_decorated(False)
+        show_window_controls = window_controls_enabled()
+        if show_window_controls:
+            win.add_css_class("omapdf-window-controls-on")
+        else:
+            win.set_decorated(False)
         win.add_css_class("omapdf-editor")
         ed.window = win
         chrome = {
@@ -1374,6 +1398,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         chrome["light"] = _light
         chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
         css.load_from_data(_editorial_css(_light))
+        if show_window_controls:
+            css.load_from_data(WINDOW_CONTROLS_CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -2541,6 +2567,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         box.append(search_bar)
         box.append(overlay)
         win.set_child(box)
+        if show_window_controls:
+            header = Gtk.HeaderBar()
+            header.add_css_class("omapdf-window-controls")
+            header.set_show_title_buttons(True)
+            header.set_title_widget(Gtk.Box())  # empty — tools stay on the rail
+            win.set_titlebar(header)
 
         # Watch the file: when an agent (or anything else) saves changes to
         # it, refresh the view — the GUI half of the ask-the-agent loop.
