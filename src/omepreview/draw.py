@@ -25,7 +25,7 @@ from pathlib import Path
 
 from . import signature as sig_store
 from .abs_pad import AbsPadWatcher, probe_abs_touchpad
-from .trackpad_sig import RecorderSession, STROKE_WIDTH, stroke_mode_label
+from .trackpad_sig import RecorderSession, ribbon_outline, stroke_mode_label
 
 
 def legacy_event_usable(event) -> bool:
@@ -170,7 +170,13 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
                         session.apply_abs("up")
                     elif ev.x is not None and ev.y is not None:
                         gx, gy = device.map_point(ev.x, ev.y, glass_w, glass_h)
-                        session.apply_abs(ev.kind, gx, gy)
+                        session.apply_abs(
+                            ev.kind,
+                            gx,
+                            gy,
+                            pressure=ev.pressure,
+                            pressure_range=device.pressure_range,
+                        )
                 redraw()
 
             from gi.repository import GLib
@@ -379,20 +385,37 @@ def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = 
                 session.grab_pointer = False
                 if session.armed:
                     # Two disconnected strokes (finger lift, then a new abs contact).
-                    session.apply_abs("down", 48, 160)
-                    for i in range(1, 90):
+                    pr = (0, 100)
+                    # One smooth stroke: hairline rise, heavy fall. Not a name.
+                    session.apply_abs(
+                        "down", 50, 240, pressure=4, pressure_range=pr
+                    )
+                    for i in range(1, 140):
+                        t = i / 140
+                        x = 50 + t * 400
+                        if t < 0.42:
+                            s = (0.42 - t) / 0.42
+                            y = 80 + 160 * s * s
+                            pressure = 5
+                        else:
+                            s = (t - 0.42) / 0.58
+                            y = 80 + 200 * s * s
+                            pressure = int(10 + 90 * s)
                         session.apply_abs(
-                            "move",
-                            48 + i * 1.6,
-                            160 + 22 * ((i % 30) / 15 - 1) ** 2,
+                            "move", x, y, pressure=pressure, pressure_range=pr
                         )
                     session.apply_abs("up")
-                    session.apply_abs("down", 280, 90)
-                    for i in range(1, 70):
+                    session.apply_abs(
+                        "down", 310, 72, pressure=8, pressure_range=pr
+                    )
+                    for i in range(1, 50):
+                        t = i / 50
                         session.apply_abs(
                             "move",
-                            280 + i * 1.4,
-                            90 + 18 * ((i % 24) / 12 - 1) ** 2 + i * 0.2,
+                            310 + t * 85,
+                            72 + 16 * ((i % 16) / 8 - 1) ** 2,
+                            pressure=int(8 + 18 * t),
+                            pressure_range=pr,
                         )
                     session.apply_abs("up")
                 redraw()
@@ -504,16 +527,18 @@ def _round_rect(ctx, x, y, w, h, r):
 
 def _paint_strokes(ctx, strokes, cairo):
     ctx.set_source_rgb(0.05, 0.05, 0.2)
-    ctx.set_line_width(STROKE_WIDTH)
-    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
-    ctx.set_line_join(cairo.LINE_JOIN_ROUND)
     for stroke in strokes:
         if len(stroke) < 2:
             continue
-        ctx.move_to(*stroke[0])
-        for point in stroke[1:]:
+        outline = ribbon_outline(stroke)
+        if len(outline) < 3:
+            continue
+        ctx.new_path()
+        ctx.move_to(*outline[0])
+        for point in outline[1:]:
             ctx.line_to(*point)
-        ctx.stroke()
+        ctx.close_path()
+        ctx.fill()
 
 
 def _install_css():
