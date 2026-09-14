@@ -55,6 +55,12 @@ PEN_COLORS = [
 ]
 NOTE_SIZE = 20.0  # points, drawn sticky-note glyph
 SELECT_COLOR = (0.15, 0.45, 0.95)
+# macOS Preview–style page chrome (dark canvas, paper sheet, edge + shadow).
+CANVAS_BG = (0.22, 0.22, 0.24)
+PAGE_MARGIN_PX = 32
+PAGE_SHADOW_OFFSET = 4
+PAGE_SHADOW_ALPHA = 0.38
+PAGE_BORDER = (0.50, 0.50, 0.54)
 
 
 def _norm_rect(it: dict) -> tuple[float, float, float, float]:
@@ -126,6 +132,9 @@ listbox row.omapdf-thumb-inserted {
   border: 1px solid alpha(#2e9e4f, 0.55);
   border-radius: 6px;
 }
+scrolledwindow.omapdf-page-canvas {
+  background-color: rgb(56, 56, 60);
+}
 """
 
 
@@ -150,7 +159,9 @@ class Editor:
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
         self.pen_color = PEN_COLORS[1][1]
-        self.zoom_pct: float | None = None  # None = fit width
+        self.zoom_pct: float | None = None  # None = fit page in viewport
+        self.page_origin = (0.0, 0.0)  # paper top-left in view pixels
+        self.paper_px = (0, 0)  # paper width/height in view pixels
         self.search_term = ""
         self.search_hits: list[tuple[int, pymupdf.Rect]] = []
         self.search_pos = -1
@@ -497,15 +508,36 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 avail = 900.0
             return avail
 
-        def fit_width_zoom() -> float:
+        def viewport_height() -> float:
+            avail = float(scroller.get_height() or 0)
+            if avail < 50:
+                avail = float(scroller.get_allocated_height())
+            if avail < 50:
+                avail = float(scroller.get_vadjustment().get_page_size())
+            if avail < 50:
+                avail = 700.0
+            return avail
+
+        def fit_page_zoom() -> float:
             page = ed.page()
-            width = page.rect.width or 595.0
-            z = (viewport_width() - 4.0) / width
-            return max(0.05, z)
+            pw = page.rect.width or 595.0
+            ph = page.rect.height or 842.0
+            margin = PAGE_MARGIN_PX * 2
+            zw = (viewport_width() - margin) / pw
+            zh = (viewport_height() - margin) / ph
+            return max(0.05, min(zw, zh))
+
+        def to_page_point(cx: float, cy: float) -> tuple[float, float]:
+            ox, oy = ed.page_origin
+            return ((cx - ox) / ed.zoom, (cy - oy) / ed.zoom)
+
+        def to_view_point(px: float, py: float) -> tuple[float, float]:
+            ox, oy = ed.page_origin
+            return (ox + px * ed.zoom, oy + py * ed.zoom)
 
         def render_page():
             if ed.zoom_pct is None:
-                z = fit_width_zoom()
+                z = fit_page_zoom()
             else:
                 z = max(0.05, ed.zoom_pct / 100 * (96 / 72))
             ed.zoom = z
@@ -518,8 +550,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.page_surface = cairo.ImageSurface.create_from_png(
                 io.BytesIO(pix.tobytes("png"))
             )
-            area.set_content_width(pix.width)
-            area.set_content_height(pix.height)
+            paper_w, paper_h = pix.width, pix.height
+            ed.paper_px = (paper_w, paper_h)
+            view_w = viewport_width()
+            view_h = viewport_height()
+            content_w = max(view_w, paper_w + 2 * PAGE_MARGIN_PX)
+            content_h = max(view_h, paper_h + 2 * PAGE_MARGIN_PX)
+            page_x = (content_w - paper_w) / 2
+            page_y = (content_h - paper_h) / 2
+            ed.page_origin = (page_x, page_y)
+            area.set_content_width(int(content_w))
+            area.set_content_height(int(content_h))
             page_label.set_text(f"{ed.page_no + 1} / {ed.page_count()}")
             update_nav()
             sidebar_api["highlight_current"](ed.page_no)
@@ -528,11 +569,33 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # -- drawing ------------------------------------------------------
 
-        def draw(_a, ctx, _w, _h):
+        def draw(_a, ctx, w, h):
             ctx.save()
-            if ed.page_surface:
-                ctx.set_source_surface(ed.page_surface, 0, 0)
-                ctx.paint()
+            ctx.set_source_rgb(*CANVAS_BG)
+            ctx.rectangle(0, 0, w, h)
+            ctx.fill()
+            ox, oy = ed.page_origin
+            pw, ph = ed.paper_px
+            if pw > 0 and ph > 0:
+                ctx.set_source_rgba(0, 0, 0, PAGE_SHADOW_ALPHA)
+                ctx.rectangle(
+                    ox + PAGE_SHADOW_OFFSET,
+                    oy + PAGE_SHADOW_OFFSET,
+                    pw,
+                    ph,
+                )
+                ctx.fill()
+                ctx.set_source_rgb(1, 1, 1)
+                ctx.rectangle(ox, oy, pw, ph)
+                ctx.fill()
+                if ed.page_surface:
+                    ctx.set_source_surface(ed.page_surface, ox, oy)
+                    ctx.paint()
+                ctx.set_source_rgb(*PAGE_BORDER)
+                ctx.set_line_width(1.0)
+                ctx.rectangle(ox, oy, pw, ph)
+                ctx.stroke()
+            ctx.translate(ox, oy)
             ctx.scale(ed.zoom, ed.zoom)
             for it in ed.pending:
                 if it["page"] == ed.page_no:
@@ -702,7 +765,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
-            rect.x, rect.y, rect.width, rect.height = int(px * ed.zoom), int(py * ed.zoom), 1, 1
+            vx, vy = to_view_point(px, py)
+            rect.x, rect.y, rect.width, rect.height = int(vx), int(vy), 1, 1
             pop.set_pointing_to(rect)
             entry = Gtk.Entry()
             entry.set_placeholder_text(placeholder)
@@ -790,7 +854,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             pop = Gtk.Popover()
             pop.set_parent(area)
             rect = Gdk.Rectangle()
-            rect.x, rect.y, rect.width, rect.height = int(px * ed.zoom), int(py * ed.zoom), 1, 1
+            vx, vy = to_view_point(px, py)
+            rect.x, rect.y, rect.width, rect.height = int(vx), int(vy), 1, 1
             pop.set_pointing_to(rect)
             # Near the right edge, open leftward so the popover stays over
             # the page instead of spilling into the sidebar/window edge.
@@ -832,7 +897,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         click = Gtk.GestureClick()
 
         def on_click(_g, n_press, cx, cy):
-            px, py = cx / ed.zoom, cy / ed.zoom
+            px, py = to_page_point(cx, cy)
             hit_item = ed.hit(px, py)
             if ed.tool == "text":
                 if hit_item and hit_item["kind"] == "text":
@@ -889,7 +954,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         area.set_has_tooltip(True)
 
         def on_tooltip(_w, tx, ty, _kb, tooltip):
-            px, py = tx / ed.zoom, ty / ed.zoom
+            px, py = to_page_point(tx, ty)
             it = ed.hit(px, py)
             if it and it.get("kind") in ("note", "text") and it.get("text"):
                 tooltip.set_text(it["text"])
@@ -911,7 +976,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         drag = Gtk.GestureDrag()
 
         def on_drag_begin(_g, sx, sy):
-            px, py = sx / ed.zoom, sy / ed.zoom
+            px, py = to_page_point(sx, sy)
             if ed.tool == "pen":
                 ed.live_stroke = [(px, py)]
             elif ed.tool == "highlight":
@@ -1398,7 +1463,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         zoom_btn.add_css_class("tool-slim")
         zoom_btn.set_valign(Gtk.Align.CENTER)
         zoom_btn.set_child(zoom_dot)
-        zoom_btn.set_tooltip_text("Zoom (Ctrl+scroll, Ctrl+0 fits width)")
+        zoom_btn.set_tooltip_text("Zoom (pinch, Ctrl+scroll; Ctrl+0 fits page)")
         zoom_pop = Gtk.Popover()
         zoom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
@@ -1407,7 +1472,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             zoom_pop.popdown()
             render_page()
 
-        for zlabel, zval in [("Fit width", None), ("50%", 50.0), ("75%", 75.0),
+        for zlabel, zval in [("Fit page", None), ("50%", 50.0), ("75%", 75.0),
                              ("100%", 100.0), ("125%", 125.0), ("150%", 150.0),
                              ("200%", 200.0)]:
             zb = Gtk.Button(label=zlabel)
@@ -1886,6 +1951,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         win.add_controller(keys)
 
         scroller = Gtk.ScrolledWindow()
+        scroller.add_css_class("omapdf-page-canvas")
         scroller.set_child(area)
         scroller.set_vexpand(True)
         scroller.set_hexpand(True)
@@ -1957,7 +2023,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             def scroll_to():
                 adj = scroller.get_vadjustment()
-                adj.set_value(max(0, rect.y0 * ed.zoom - scroller.get_height() / 3))
+                _, page_y = ed.page_origin
+                adj.set_value(max(0, page_y + rect.y0 * ed.zoom - scroller.get_height() / 3))
                 return False
 
             GLib.idle_add(scroll_to)
@@ -2001,7 +2068,31 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         scroll_ctl.connect("scroll", on_scroll)
         scroller.add_controller(scroll_ctl)
 
-        # Keep fit-width honest when the viewport changes — sidebar sliding
+        pinch = Gtk.GestureZoom.new()
+        pinch_state = {"start_pct": None}
+
+        def on_pinch_begin(_gesture, _seq):
+            pinch_state["start_pct"] = (
+                ed.zoom_pct if ed.zoom_pct is not None
+                else ed.zoom / (96 / 72) * 100
+            )
+
+        def on_pinch(_gesture, scale):
+            start = pinch_state["start_pct"]
+            if start is None:
+                return
+            ed.zoom_pct = max(25.0, min(400.0, start * scale))
+            render_page()
+
+        def on_pinch_end(_gesture, _seq):
+            pinch_state["start_pct"] = None
+
+        pinch.connect("begin", on_pinch_begin)
+        pinch.connect("scale-changed", on_pinch)
+        pinch.connect("end", on_pinch_end)
+        scroller.add_controller(pinch)
+
+        # Keep fit-page honest when the viewport changes — sidebar sliding
         # in or out, window resizes. Debounced so the revealer animation
         # causes one re-render, not thirty.
         fit_state = {"pending": False}
@@ -2013,7 +2104,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             def rerender():
                 fit_state["pending"] = False
-                if ed.zoom_pct is None and abs(fit_width_zoom() - ed.zoom) > 0.004:
+                if ed.zoom_pct is None and abs(fit_page_zoom() - ed.zoom) > 0.004:
                     render_page()
                 return False
 
@@ -2030,6 +2121,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 on_viewport_change(scroller.get_hadjustment(), None)
 
         scroller.connect("notify::width", on_scroller_width)
+
+        def on_scroller_height(_widget, _pspec):
+            if scroller.get_height() < 50:
+                return
+            if ed.zoom_pct is None:
+                on_viewport_change(scroller.get_vadjustment(), None)
+
+        scroller.connect("notify::height", on_scroller_height)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         content.set_hexpand(True)
