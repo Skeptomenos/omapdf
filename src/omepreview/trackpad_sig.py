@@ -14,11 +14,19 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import NamedTuple
 
-STROKE_WIDTH = 3.5
+# Constant-width fallback when the pad has no pressure axis.
+FALLBACK_RADIUS = 1.15
+# Pressure axis: light contact is a hairline, firm is a pen downstroke.
+HAIRLINE_RADIUS = 0.45
+MAX_RADIUS = 3.7
+STROKE_WIDTH = FALLBACK_RADIUS * 2  # docs / older callers: fallback diameter
 SVG_PAD = 8.0
 # Finger lift + new contact on an absolute pad looks like a teleport.
 JUMP_PX = 80.0
+_CAP_STEPS = 8
+_RADIUS_EMA = 0.55
 
 
 def should_capture(
@@ -83,6 +91,108 @@ def stroke_mode_label(
     )
 
 
+class InkPoint(NamedTuple):
+    """Pad-local sample. `radius` is half the local ink width."""
+
+    x: float
+    y: float
+    radius: float
+
+
+def as_ink_point(point) -> InkPoint:
+    if isinstance(point, InkPoint):
+        return point
+    if len(point) >= 3:
+        return InkPoint(float(point[0]), float(point[1]), float(point[2]))
+    return InkPoint(float(point[0]), float(point[1]), FALLBACK_RADIUS)
+
+
+def pressure_to_radius(
+    raw: int | None,
+    pressure_range: tuple[int, int] | None,
+) -> float:
+    """Map a device pressure sample to ink radius.
+
+    No pressure axis → thin constant fallback. Min/zero pressure on a real
+    axis → hairline. Max pressure → thick downstroke.
+    """
+    if pressure_range is None:
+        return FALLBACK_RADIUS
+    if raw is None:
+        return HAIRLINE_RADIUS
+    pmin, pmax = int(pressure_range[0]), int(pressure_range[1])
+    if pmax <= pmin:
+        return FALLBACK_RADIUS
+    t = (float(raw) - pmin) / (pmax - pmin)
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    t = t**1.2
+    return HAIRLINE_RADIUS + (MAX_RADIUS - HAIRLINE_RADIUS) * t
+
+
+def _unit(dx: float, dy: float) -> tuple[float, float]:
+    h = math.hypot(dx, dy)
+    if h < 1e-9:
+        return 1.0, 0.0
+    return dx / h, dy / h
+
+
+def _tangent_at(points: list[InkPoint], i: int) -> tuple[float, float]:
+    if i == 0:
+        return _unit(points[1].x - points[0].x, points[1].y - points[0].y)
+    if i == len(points) - 1:
+        return _unit(
+            points[i].x - points[i - 1].x, points[i].y - points[i - 1].y
+        )
+    return _unit(
+        points[i + 1].x - points[i - 1].x, points[i + 1].y - points[i - 1].y
+    )
+
+
+def _cap(
+    cx: float, cy: float, radius: float, tx: float, ty: float, *, start: bool
+) -> list[tuple[float, float]]:
+    heading = math.atan2(ty, tx)
+    a0 = heading - math.pi / 2 if start else heading + math.pi / 2
+    pts: list[tuple[float, float]] = []
+    for i in range(1, _CAP_STEPS):
+        a = a0 - math.pi * (i / _CAP_STEPS)
+        pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
+    return pts
+
+
+def ribbon_outline(points: list[InkPoint]) -> list[tuple[float, float]]:
+    """Filled-ribbon polygon for a variable-width stroke (round caps)."""
+    ink = [as_ink_point(p) for p in points]
+    if len(ink) < 2:
+        return []
+    if math.hypot(ink[-1].x - ink[0].x, ink[-1].y - ink[0].y) < 1e-6 and all(
+        math.hypot(p.x - ink[0].x, p.y - ink[0].y) < 1e-6 for p in ink
+    ):
+        r = ink[0].radius
+        return [
+            (
+                ink[0].x + r * math.cos(i * 2 * math.pi / 16),
+                ink[0].y + r * math.sin(i * 2 * math.pi / 16),
+            )
+            for i in range(16)
+        ]
+    lefts: list[tuple[float, float]] = []
+    rights: list[tuple[float, float]] = []
+    for i, p in enumerate(ink):
+        tx, ty = _tangent_at(ink, i)
+        nx, ny = -ty, tx
+        lefts.append((p.x + nx * p.radius, p.y + ny * p.radius))
+        rights.append((p.x - nx * p.radius, p.y - ny * p.radius))
+    tx0, ty0 = _tangent_at(ink, 0)
+    txn, tyn = _tangent_at(ink, len(ink) - 1)
+    start_cap = _cap(ink[0].x, ink[0].y, ink[0].radius, tx0, ty0, start=True)
+    end_cap = _cap(ink[-1].x, ink[-1].y, ink[-1].radius, txn, tyn, start=False)
+    return start_cap + lefts + end_cap + list(reversed(rights))
+
+
 class PadMapper:
     """Map grabbed pointer motion onto the on-screen pad.
 
@@ -137,9 +247,10 @@ class RecorderSession:
         self.armed = False
         self.grab_pointer = False
         self.abs_active = False
-        self.strokes: list[list[tuple[float, float]]] = []
+        self.strokes: list[list[InkPoint]] = []
         self.drawing = False
         self.mapper = PadMapper(self.pad_w, self.pad_h)
+        self._radius_ema: float | None = None
 
     def has_ink(self) -> bool:
         return any(len(s) >= 2 for s in self.strokes)
@@ -152,6 +263,7 @@ class RecorderSession:
         self.armed = True
         self.grab_pointer = True
         self.abs_active = False
+        self._radius_ema = None
 
     def handle_enter(self) -> bool:
         """True when the session has ink to save. Disarms after a successful save."""
@@ -165,12 +277,16 @@ class RecorderSession:
     def end_stroke(self) -> None:
         self.drawing = False
         self.mapper.last = None
+        self._radius_ema = None
 
     def apply_abs(
         self,
         kind: str,
         x: float | None = None,
         y: float | None = None,
+        *,
+        pressure: int | None = None,
+        pressure_range: tuple[int, int] | None = None,
     ) -> bool:
         """Contact from an absolute pad. `kind` is down / move / up.
 
@@ -186,12 +302,20 @@ class RecorderSession:
             return False
         px = _clamp(float(x), 0.0, self.pad_w)
         py = _clamp(float(y), 0.0, self.pad_h)
+        radius = pressure_to_radius(pressure, pressure_range)
         if kind == "down":
             self.end_stroke()
-            return self.add_point(px, py, button1=False)
-        return self.add_point(px, py, button1=False)
+            return self.add_point(px, py, button1=False, radius=radius)
+        return self.add_point(px, py, button1=False, radius=radius)
 
-    def add_point(self, x: float, y: float, *, button1: bool = False) -> bool:
+    def add_point(
+        self,
+        x: float,
+        y: float,
+        *,
+        button1: bool = False,
+        radius: float | None = None,
+    ) -> bool:
         """Append a pad-local point. Returns True if captured."""
         if not should_capture(
             armed=self.armed, button1=button1, click_mode=self.click_mode
@@ -199,14 +323,21 @@ class RecorderSession:
             if self.drawing:
                 self.end_stroke()
             return False
-        point = (float(x), float(y))
+        raw_r = FALLBACK_RADIUS if radius is None else float(radius)
+        if self._radius_ema is None:
+            self._radius_ema = raw_r
+        else:
+            self._radius_ema = _RADIUS_EMA * raw_r + (1.0 - _RADIUS_EMA) * self._radius_ema
+        point = InkPoint(float(x), float(y), self._radius_ema)
         if not self.drawing:
             self.strokes.append([point])
             self.drawing = True
             return True
         last = self.strokes[-1][-1]
-        if abs(last[0] - point[0]) > 0.4 or abs(last[1] - point[1]) > 0.4:
+        if abs(last.x - point.x) > 0.4 or abs(last.y - point.y) > 0.4:
             self.strokes[-1].append(point)
+        elif abs(last.radius - point.radius) > 0.08:
+            self.strokes[-1][-1] = point
         return True
 
     def motion(
@@ -239,8 +370,16 @@ class RecorderSession:
         return path
 
 
-def strokes_to_svg(strokes: list[list[tuple[float, float]]]) -> str:
-    points = [p for s in strokes for p in s]
+def strokes_to_svg(strokes: list) -> str:
+    """Export variable-width ink as filled ribbons (not a single stroke-width)."""
+    outlines: list[list[tuple[float, float]]] = []
+    for stroke in strokes:
+        if len(stroke) < 2:
+            continue
+        outline = ribbon_outline([as_ink_point(p) for p in stroke])
+        if len(outline) >= 3:
+            outlines.append(outline)
+    points = [p for o in outlines for p in o]
     if not points:
         raise ValueError("no strokes to export")
     xs = [p[0] for p in points]
@@ -250,22 +389,19 @@ def strokes_to_svg(strokes: list[list[tuple[float, float]]]) -> str:
     width = max(max(xs) - min_x + SVG_PAD, 1.0)
     height = max(max(ys) - min_y + SVG_PAD, 1.0)
     parts: list[str] = []
-    for stroke in strokes:
-        if len(stroke) < 2:
-            continue
-        cmds = [f"M {_fmt(stroke[0][0] - min_x)} {_fmt(stroke[0][1] - min_y)}"]
+    for outline in outlines:
+        cmds = [f"M {_fmt(outline[0][0] - min_x)} {_fmt(outline[0][1] - min_y)}"]
         cmds.extend(
-            f"L {_fmt(x - min_x)} {_fmt(y - min_y)}" for x, y in stroke[1:]
+            f"L {_fmt(x - min_x)} {_fmt(y - min_y)}" for x, y in outline[1:]
         )
+        cmds.append("Z")
         parts.append(" ".join(cmds))
     path_d = " ".join(parts)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{_fmt(width)}" height="{_fmt(height)}" '
         f'viewBox="0 0 {_fmt(width)} {_fmt(height)}">\n'
-        f'  <path d="{path_d}" fill="none" stroke="#0d0d33" '
-        f'stroke-width="{STROKE_WIDTH}" stroke-linecap="round" '
-        f'stroke-linejoin="round"/>\n'
+        f'  <path d="{path_d}" fill="#0d0d33"/>\n'
         f"</svg>\n"
     )
 

@@ -5,7 +5,9 @@ import os
 from omepreview.abs_pad import (
     ABS_MT_POSITION_X,
     ABS_MT_POSITION_Y,
+    ABS_MT_PRESSURE,
     ABS_MT_TRACKING_ID,
+    ABS_PRESSURE,
     ABS_X,
     ABS_Y,
     BTN_TOOL_FINGER,
@@ -79,6 +81,42 @@ def test_btn_touch_abs_xy_contact():
     assert events[0].x == 40 and events[0].y == 60
 
 
+def test_mt_pressure_is_carried_on_contact():
+    parser = MtParser()
+    events = _feed(
+        parser,
+        (EV_ABS, ABS_MT_TRACKING_ID, 1),
+        (EV_ABS, ABS_MT_POSITION_X, 10),
+        (EV_ABS, ABS_MT_POSITION_Y, 20),
+        (EV_ABS, ABS_MT_PRESSURE, 40),
+        (EV_SYN, SYN_REPORT, 0),
+        (EV_ABS, ABS_MT_POSITION_X, 12),
+        (EV_ABS, ABS_MT_PRESSURE, 200),
+        (EV_SYN, SYN_REPORT, 0),
+        (EV_ABS, ABS_MT_TRACKING_ID, -1),
+        (EV_SYN, SYN_REPORT, 0),
+    )
+    assert [e.kind for e in events] == ["down", "move", "up"]
+    assert events[0].pressure == 40
+    assert events[1].pressure == 200
+
+
+def test_abs_pressure_fallback_axis():
+    parser = MtParser()
+    events = _feed(
+        parser,
+        (EV_KEY, BTN_TOUCH, 1),
+        (EV_ABS, ABS_X, 5),
+        (EV_ABS, ABS_Y, 6),
+        (EV_ABS, ABS_PRESSURE, 77),
+        (EV_SYN, SYN_REPORT, 0),
+        (EV_KEY, BTN_TOUCH, 0),
+        (EV_SYN, SYN_REPORT, 0),
+    )
+    assert events[0].kind == "down"
+    assert events[0].pressure == 77
+
+
 def test_parser_and_session_new_contact_is_disconnected():
     parser = MtParser()
     session = RecorderSession(pad_size=(200.0, 100.0))
@@ -113,8 +151,8 @@ def test_parser_and_session_new_contact_is_disconnected():
                 session.apply_abs(ev.kind, x, y)
     inked = [s for s in session.strokes if len(s) >= 2]
     assert len(inked) == 2
-    assert inked[0][0] == map_abs_to_pad(100, 50, axes, 200, 100)
-    assert inked[1][0] == map_abs_to_pad(800, 400, axes, 200, 100)
+    assert (inked[0][0].x, inked[0][0].y) == map_abs_to_pad(100, 50, axes, 200, 100)
+    assert (inked[1][0].x, inked[1][0].y) == map_abs_to_pad(800, 400, axes, 200, 100)
     assert strokes_to_svg(session.strokes).count("M ") == 2
 
 

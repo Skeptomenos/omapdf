@@ -32,10 +32,12 @@ SYN_REPORT = 0
 SYN_MT_REPORT = 2
 ABS_X = 0x00
 ABS_Y = 0x01
+ABS_PRESSURE = 0x18
 ABS_MT_SLOT = 0x2F
 ABS_MT_POSITION_X = 0x35
 ABS_MT_POSITION_Y = 0x36
 ABS_MT_TRACKING_ID = 0x39
+ABS_MT_PRESSURE = 0x3A
 BTN_TOUCH = 0x14A
 BTN_TOOL_FINGER = 0x145
 BTN_TOOL_PEN = 0x140
@@ -170,6 +172,7 @@ class ContactEvent:
     kind: str  # "down" | "move" | "up"
     x: int | None = None
     y: int | None = None
+    pressure: int | None = None
 
 
 class MtParser:
@@ -183,15 +186,17 @@ class MtParser:
     def __init__(self) -> None:
         self.slot = 0
         self.slots: dict[int, dict[str, int | None]] = {
-            0: {"id": -1, "x": None, "y": None}
+            0: {"id": -1, "x": None, "y": None, "pressure": None}
         }
         self.btn_touch: bool | None = None
         self.btn_finger: bool | None = None
         self.abs_x: int | None = None
         self.abs_y: int | None = None
+        self.abs_pressure: int | None = None
         self.contact = False
         self.last_x: int | None = None
         self.last_y: int | None = None
+        self.last_pressure: int | None = None
         self._proto_a: list[tuple[int | None, int | None]] = []
         self._a_x: int | None = None
         self._a_y: int | None = None
@@ -200,7 +205,7 @@ class MtParser:
     def _ensure_slot(self, n: int) -> dict[str, int | None]:
         slot = self.slots.get(n)
         if slot is None:
-            slot = {"id": -1, "x": None, "y": None}
+            slot = {"id": -1, "x": None, "y": None, "pressure": None}
             self.slots[n] = slot
         return slot
 
@@ -224,6 +229,10 @@ class MtParser:
                 self.abs_x = int(value)
             elif code == ABS_Y:
                 self.abs_y = int(value)
+            elif code == ABS_MT_PRESSURE:
+                self._ensure_slot(self.slot)["pressure"] = int(value)
+            elif code == ABS_PRESSURE:
+                self.abs_pressure = int(value)
         elif etype == EV_KEY:
             if code == BTN_TOUCH:
                 self.btn_touch = bool(value)
@@ -260,6 +269,12 @@ class MtParser:
             return self._proto_a[0]
         return self.abs_x, self.abs_y
 
+    def _primary_pressure(self) -> int | None:
+        slot = self._live_slot()
+        if slot is not None and slot.get("pressure") is not None:
+            return slot["pressure"]
+        return self.abs_pressure
+
     def _in_contact(self) -> bool:
         if self._live_slot() is not None:
             return True
@@ -281,21 +296,26 @@ class MtParser:
     def _flush(self) -> list[ContactEvent]:
         in_c = self._in_contact()
         x, y = self._primary_xy()
+        pressure = self._primary_pressure()
         self._proto_a = []
         events: list[ContactEvent] = []
         if in_c and not self.contact:
             if x is None or y is None:
                 return events
             self.contact = True
-            self.last_x, self.last_y = x, y
-            events.append(ContactEvent("down", x, y))
+            self.last_x, self.last_y, self.last_pressure = x, y, pressure
+            events.append(ContactEvent("down", x, y, pressure))
         elif not in_c and self.contact:
             self.contact = False
-            events.append(ContactEvent("up", self.last_x, self.last_y))
+            events.append(ContactEvent("up", self.last_x, self.last_y, self.last_pressure))
         elif in_c and x is not None and y is not None:
-            if x != self.last_x or y != self.last_y:
-                self.last_x, self.last_y = x, y
-                events.append(ContactEvent("move", x, y))
+            if (
+                x != self.last_x
+                or y != self.last_y
+                or pressure != self.last_pressure
+            ):
+                self.last_x, self.last_y, self.last_pressure = x, y, pressure
+                events.append(ContactEvent("move", x, y, pressure))
         return events
 
 
@@ -350,6 +370,7 @@ class EvdevAbsDevice:
     name: str
     axes: AbsRange
     has_mt: bool
+    pressure_range: tuple[int, int] | None = None
     parser: MtParser = field(default_factory=MtParser)
     grabbed: bool = False
     ioctl: object = field(default=fcntl.ioctl)
@@ -475,8 +496,18 @@ def _open_candidate(path: str) -> tuple[EvdevAbsDevice | None, bool]:
             os.close(fd)
             return None, False
         axes = AbsRange(xr[0], xr[1], yr[0], yr[1])
+        pr = None
+        if has_mt:
+            pr = _ioctl_abs(fd, ABS_MT_PRESSURE)
+        if pr is None:
+            pr = _ioctl_abs(fd, ABS_PRESSURE)
         dev = EvdevAbsDevice(
-            path=path, fd=fd, name=name or path, axes=axes, has_mt=has_mt
+            path=path,
+            fd=fd,
+            name=name or path,
+            axes=axes,
+            has_mt=has_mt,
+            pressure_range=pr,
         )
         # Stash score on the instance for the picker.
         dev._score = score  # type: ignore[attr-defined]

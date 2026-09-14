@@ -12,6 +12,12 @@ graphic; lift, then a finger down elsewhere starts a **new** stroke at that
 mapped location. Relative pointer deltas are not the model (they leave the
 cursor at the last ink point after a lift).
 
+Pressure (`ABS_MT_PRESSURE`, else `ABS_PRESSURE`) maps to **stroke radius
+along the path**: light contact is a hairline, firm contact a thicker
+downstroke — the same pen-on-paper look as Preview. Live GTK drawing and the
+saved SVG are both a filled ribbon (not one `stroke-width`). If the pad has
+no pressure axis, ink is a thin constant width.
+
 ## Behaviour
 
 - **Default** (`omepreview sig draw`): the window *is* the trackpad (rounded
@@ -51,6 +57,7 @@ still reach the recorder window. It then reads:
 
 1. `ABS_MT_POSITION_X` / `ABS_MT_POSITION_Y` (multitouch protocol B, preferred)
 2. else `ABS_X` / `ABS_Y` plus `BTN_TOUCH` / `BTN_TOOL_FINGER`
+3. `ABS_MT_PRESSURE` (else `ABS_PRESSURE`) per sample → local ink radius
 
 The device abs range is scaled onto the on-screen pad widget (independent X/Y,
 top-left origin). `BTN_TOUCH` / `ABS_MT_TRACKING_ID == -1` ends the stroke.
@@ -87,8 +94,8 @@ seeing the pad.
 
 - `omepreview.abs_pad` — evdev discovery, MT parser, abs→pad mapping,
   EVIOCGRAB lifecycle (tested)
-- `omepreview.trackpad_sig` — capture policy, Space/Enter session, SVG
-  export, abs contact up/down (tested)
+- `omepreview.trackpad_sig` — capture policy, Space/Enter session, pressure→radius,
+  filled-ribbon SVG (tested)
 - `omepreview.draw` — GTK4 trackpad-shaped window, live ink, exclusive
   touchpad grab while armed; `EventControllerLegacy` ignores `event=None`
 - `omepreview.signature` — SVG store under `~/.config/omepreview/signatures/`

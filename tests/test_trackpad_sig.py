@@ -1,8 +1,14 @@
 """Trackpad signature capture policy tests."""
 
 from omepreview.trackpad_sig import (
+    FALLBACK_RADIUS,
+    HAIRLINE_RADIUS,
+    MAX_RADIUS,
+    InkPoint,
     PadMapper,
     RecorderSession,
+    pressure_to_radius,
+    ribbon_outline,
     should_capture,
     stroke_mode_label,
     strokes_to_svg,
@@ -94,7 +100,9 @@ def test_stroke_mode_labels_have_no_hover_goal():
 def test_strokes_to_svg_is_svg():
     svg = strokes_to_svg([[(0, 0), (10, 4), (20, 0)]])
     assert svg.startswith("<svg")
-    assert "stroke-linecap=\"round\"" in svg
+    assert 'fill="#0d0d33"' in svg
+    assert "stroke-width" not in svg
+    assert " Z" in svg
 
 
 def test_pad_mapper_relative_deltas_stay_on_pad():
@@ -154,8 +162,8 @@ def test_new_contact_at_different_abs_starts_disconnected_stroke():
     inked = [s for s in session.strokes if len(s) >= 2]
     assert len(inked) == 2
     first, second = inked
-    assert first[0] == (12.0, 18.0)
-    assert second[0] == (160.0, 80.0)
+    assert (first[0].x, first[0].y) == (12.0, 18.0)
+    assert (second[0].x, second[0].y) == (160.0, 80.0)
     # No connecting segment from the last ink point to the new contact.
     assert abs(first[-1][0] - second[0][0]) > 80
     svg = strokes_to_svg(session.strokes)
@@ -167,3 +175,68 @@ def test_click_mode_ignores_abs_contacts():
     session.handle_space()
     assert not session.apply_abs("down", 10, 10)
     assert not session.has_ink()
+
+
+def test_higher_pressure_wider_segment():
+    lo = pressure_to_radius(0, (0, 255))
+    hi = pressure_to_radius(255, (0, 255))
+    mid = pressure_to_radius(128, (0, 255))
+    assert lo == HAIRLINE_RADIUS
+    assert hi == MAX_RADIUS
+    assert lo < mid < hi
+    thin = [
+        InkPoint(0, 0, lo),
+        InkPoint(30, 0, lo),
+        InkPoint(60, 0, lo),
+    ]
+    fat = [
+        InkPoint(0, 0, hi),
+        InkPoint(30, 0, hi),
+        InkPoint(60, 0, hi),
+    ]
+    def _width(pts):
+        outline = ribbon_outline(pts)
+        ys = [y for x, y in outline if 20 < x < 40]
+        return max(ys) - min(ys)
+
+    assert _width(fat) > _width(thin) + 2
+
+
+def test_zero_min_pressure_is_hairline():
+    assert pressure_to_radius(0, (0, 255)) == HAIRLINE_RADIUS
+    assert pressure_to_radius(10, (10, 200)) == HAIRLINE_RADIUS
+    assert pressure_to_radius(99, None) == FALLBACK_RADIUS
+    assert pressure_to_radius(None, None) == FALLBACK_RADIUS
+    session = RecorderSession()
+    session.handle_space()
+    session.add_point(0, 0, radius=HAIRLINE_RADIUS)
+    session.add_point(10, 0, radius=HAIRLINE_RADIUS)
+    assert session.strokes[0][-1].radius <= HAIRLINE_RADIUS + 0.2
+
+
+def test_svg_contains_varying_geometry():
+    stroke = [
+        InkPoint(0, 20, HAIRLINE_RADIUS),
+        InkPoint(40, 20, HAIRLINE_RADIUS),
+        InkPoint(80, 20, MAX_RADIUS),
+        InkPoint(120, 20, MAX_RADIUS),
+    ]
+    svg = strokes_to_svg([stroke])
+    assert 'fill="#0d0d33"' in svg
+    assert "stroke-width" not in svg
+    outline = ribbon_outline(stroke)
+    ys_thin = [y for x, y in outline if 35 <= x <= 45]
+    ys_fat = [y for x, y in outline if 75 <= x <= 85]
+    assert ys_thin and ys_fat
+    assert (max(ys_fat) - min(ys_fat)) > (max(ys_thin) - min(ys_thin)) + 3
+    session = RecorderSession()
+    session.handle_space()
+    pr = (0, 100)
+    session.apply_abs("down", 0, 10, pressure=0, pressure_range=pr)
+    session.apply_abs("move", 20, 10, pressure=0, pressure_range=pr)
+    session.apply_abs("move", 40, 10, pressure=100, pressure_range=pr)
+    session.apply_abs("move", 60, 10, pressure=100, pressure_range=pr)
+    radii = [p.radius for p in session.strokes[0]]
+    assert radii[-1] > radii[0]
+    assert " Z" in strokes_to_svg(session.strokes)
+
