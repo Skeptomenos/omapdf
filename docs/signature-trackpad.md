@@ -13,8 +13,10 @@ mapped location. Relative pointer deltas are not the model (they leave the
 cursor at the last ink point after a lift).
 
 Pressure (`ABS_MT_PRESSURE`, else `ABS_PRESSURE`) maps to **stroke radius
-along the path**: light contact is a hairline, firm contact a thicker
-downstroke — the same pen-on-paper look as Preview. Live GTK drawing and the
+along the path**: the lightest contact is a hairline; a modest rest-and-glide
+already thickens. Apple pads often report contact in a **low slice** of the
+ABS range — that slice is treated as full width (ease-out curve), so max
+width does not need a firm click or force-touch. Live GTK drawing and the
 saved SVG are both a filled ribbon (not one `stroke-width`). If the pad has
 no pressure axis, ink is a thin constant width.
 
@@ -26,8 +28,10 @@ no pressure axis, ink is a thin constant width.
   Lifting the finger ends the current stroke (no connecting line across a lift).
 - **Fallback** (`omepreview sig draw --click`): Space still arms; then
   classic mouse click-and-drag on the pad.
-- **Enter** writes an **SVG** to `~/.config/omepreview/signatures/` (name
-  `default` unless `--name` is given).
+- **Enter** writes an **SVG** to `~/Downloads/omapreview/signature/` (that
+  spelling — `omapreview`, not `omepreview`; name `default` unless `--name`
+  is given). The directory is created on save. Placement still reads leftover
+  files in `~/.config/omepreview/signatures/`.
 - **Space** while armed or after ink: clear and re-arm. There is no
   incremental edit of a saved signature — record again.
 - **Editor**: Sign opens a dropdown of saved signatures. Select one and
@@ -98,4 +102,5 @@ seeing the pad.
   filled-ribbon SVG (tested)
 - `omepreview.draw` — GTK4 trackpad-shaped window, live ink, exclusive
   touchpad grab while armed; `EventControllerLegacy` ignores `event=None`
-- `omepreview.signature` — SVG store under `~/.config/omepreview/signatures/`
+- `omepreview.signature` — SVG store under `~/Downloads/omapreview/signature/`
+  (legacy read fallback: `~/.config/omepreview/signatures/`)

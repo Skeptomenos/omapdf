@@ -18,9 +18,14 @@ from typing import NamedTuple
 
 # Constant-width fallback when the pad has no pressure axis.
 FALLBACK_RADIUS = 1.15
-# Pressure axis: light contact is a hairline, firm is a pen downstroke.
+# Pressure axis: lightest contact is a hairline; a modest rest-and-glide
+# already thickens. Apple/libinput pads often sit in a low slice of the
+# ABS range — that slice is treated as full width (ease-out), so max
+# radius does not need a firm click / force-touch.
 HAIRLINE_RADIUS = 0.45
 MAX_RADIUS = 3.7
+PRESSURE_FULL_AT = 0.16  # fraction of (pmax-pmin) that maps to MAX_RADIUS
+PRESSURE_GAMMA = 0.40  # ease-out: mid-low u already near thick
 STROKE_WIDTH = FALLBACK_RADIUS * 2  # docs / older callers: fallback diameter
 SVG_PAD = 8.0
 # Finger lift + new contact on an absolute pad looks like a teleport.
@@ -108,27 +113,29 @@ def as_ink_point(point) -> InkPoint:
 
 
 def pressure_to_radius(
-    raw: int | None,
-    pressure_range: tuple[int, int] | None,
+    raw: int | float | None,
+    pressure_range: tuple[float, float] | None,
 ) -> float:
     """Map a device pressure sample to ink radius.
 
-    No pressure axis → thin constant fallback. Min/zero pressure on a real
-    axis → hairline. Max pressure → thick downstroke.
+    No pressure axis → thin constant fallback. Raw at or below the axis
+    minimum → hairline. A small slice of the remaining range (see
+    ``PRESSURE_FULL_AT``) already maps to ``MAX_RADIUS``, with an ease-out
+    curve so mid-low normalized pressure is already near a thick radius.
     """
     if pressure_range is None:
         return FALLBACK_RADIUS
     if raw is None:
         return HAIRLINE_RADIUS
-    pmin, pmax = int(pressure_range[0]), int(pressure_range[1])
-    if pmax <= pmin:
+    pmin, pmax = float(pressure_range[0]), float(pressure_range[1])
+    span = pmax - pmin
+    if span <= 0:
         return FALLBACK_RADIUS
-    t = (float(raw) - pmin) / (pmax - pmin)
-    if t < 0.0:
-        t = 0.0
-    elif t > 1.0:
-        t = 1.0
-    t = t**1.2
+    u = (float(raw) - pmin) / span
+    if u <= 0.0:
+        return HAIRLINE_RADIUS
+    t = min(1.0, u / PRESSURE_FULL_AT)
+    t = t**PRESSURE_GAMMA
     return HAIRLINE_RADIUS + (MAX_RADIUS - HAIRLINE_RADIUS) * t
 
 

@@ -1,9 +1,13 @@
-"""Signature store: named SVG (or imported PNG) files in the user's config dir.
+"""Signature store: named SVG (or imported PNG) files.
 
 Recorded signatures are SVG. `place_signature` and the Sign tool consume SVG
-(and still open a leftover PNG if one exists). Files live in
-~/.config/omepreview/signatures/. The name "default" is what `place_signature`
-uses when no name is given.
+(and still open a leftover PNG if one exists). New files live in
+~/Downloads/omapreview/signature/ (that product spelling — omapreview, not
+omepreview). The name "default" is what `place_signature` uses when no name
+is given.
+
+Reads also look in the legacy dir ~/.config/omepreview/signatures/ so an
+existing default.svg still places.
 """
 
 from __future__ import annotations
@@ -15,21 +19,49 @@ from pathlib import Path
 _SUFFIXES = (".svg", ".png")
 
 
-def store_dir() -> Path:
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    d = base / "omepreview" / "signatures"
-    d.mkdir(parents=True, exist_ok=True)
+def store_dir(*, create: bool = True) -> Path:
+    """Writable store: ~/Downloads/omapreview/signature/."""
+    d = Path.home() / "Downloads" / "omapreview" / "signature"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def path_for(name: str) -> Path:
+def legacy_store_dir() -> Path:
+    """Read-only fallback: ~/.config/omepreview/signatures/."""
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "omepreview" / "signatures"
+
+
+def _validate_name(name: str) -> None:
     if "/" in name or name.startswith("."):
         raise ValueError(f"invalid signature name {name!r}")
-    svg = store_dir() / f"{name}.svg"
-    png = store_dir() / f"{name}.png"
-    if svg.is_file() or not png.is_file():
+
+
+def _file_in(directory: Path, name: str) -> Path | None:
+    svg = directory / f"{name}.svg"
+    png = directory / f"{name}.png"
+    if svg.is_file():
         return svg
-    return png
+    if png.is_file():
+        return png
+    return None
+
+
+def path_for(name: str) -> Path:
+    """Preferred path for `name`.
+
+    Existing file in the Downloads store wins; otherwise a leftover in the
+    legacy config dir; otherwise the SVG path where the next save will land.
+    """
+    _validate_name(name)
+    found = _file_in(store_dir(create=False), name)
+    if found is not None:
+        return found
+    found = _file_in(legacy_store_dir(), name)
+    if found is not None:
+        return found
+    return store_dir(create=False) / f"{name}.svg"
 
 
 def add(source: str | Path, name: str = "default") -> Path:
@@ -41,10 +73,12 @@ def add(source: str | Path, name: str = "default") -> Path:
         raise ValueError(
             "signatures must be SVG (recorder default) or PNG to import"
         )
-    dest = store_dir() / f"{name}{suffix}"
+    _validate_name(name)
+    dest_dir = store_dir(create=True)
+    dest = dest_dir / f"{name}{suffix}"
     shutil.copyfile(source, dest)
     other = ".png" if suffix == ".svg" else ".svg"
-    (store_dir() / f"{name}{other}").unlink(missing_ok=True)
+    (dest_dir / f"{name}{other}").unlink(missing_ok=True)
     return dest
 
 
@@ -61,20 +95,29 @@ def get(name: str = "default") -> Path:
 
 def list_names() -> list[str]:
     names: set[str] = set()
-    for p in store_dir().iterdir():
-        if p.is_file() and p.suffix.lower() in _SUFFIXES:
-            names.add(p.stem)
+    for d in (store_dir(create=False), legacy_store_dir()):
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.is_file() and p.suffix.lower() in _SUFFIXES:
+                names.add(p.stem)
     return sorted(names)
 
 
 def remove(name: str) -> None:
-    svg = store_dir() / f"{name}.svg"
-    png = store_dir() / f"{name}.png"
-    if not svg.is_file() and not png.is_file():
-        path_for(name).unlink(missing_ok=False)
-        return
-    svg.unlink(missing_ok=True)
-    png.unlink(missing_ok=True)
+    _validate_name(name)
+    removed = False
+    for d in (store_dir(create=False), legacy_store_dir()):
+        for suffix in _SUFFIXES:
+            p = d / f"{name}{suffix}"
+            if p.is_file():
+                p.unlink()
+                removed = True
+    if not removed:
+        known = ", ".join(list_names()) or "(none saved)"
+        raise FileNotFoundError(
+            f"no signature named {name!r}. Saved signatures: {known}."
+        )
 
 
 def aspect_ratio(path: str | Path) -> float:
