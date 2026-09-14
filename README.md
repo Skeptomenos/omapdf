@@ -53,7 +53,7 @@ Arch: [`packaging/PKGBUILD`](packaging/PKGBUILD) (`pkgver=0.0.1`).
 ```bash
 omepreview edit document.pdf
 omepreview read document.pdf --json
-omepreview sig draw                   # Space to record, finger glide, Enter saves SVG
+omepreview sig draw                   # Space to record; finger on pad draws at that spot; Enter saves SVG
 omepreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
 omepreview --version                  # omepreview 0.0.1
 ```

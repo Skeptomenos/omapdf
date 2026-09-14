@@ -431,7 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", default="default")
     sp = sig_sub.add_parser(
         "draw",
-        help="record a signature (Space to start, finger glide, Enter saves SVG; --click for mouse)",
+        help="record a signature (Space to start, finger-on-pad abs mapping, Enter saves SVG; --click for mouse)",
     )
     sp.add_argument("--name", default="default")
     sp.add_argument(
