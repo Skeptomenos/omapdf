@@ -5,6 +5,23 @@ project's stable contract: the CLI, MCP server, and GUI are all clients of it,
 and third-party tools are welcome to speak it directly (`omapdf apply doc.pdf
 --ops ops.json`).
 
+## CLI and MCP
+
+Each op is available through `omapdf apply --ops file.json` and MCP
+`apply_ops`. Convenience wrappers:
+
+| Op | CLI | MCP |
+|----|-----|-----|
+| Page list | `omapdf pages FILE --list` | `list_pages` |
+| Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages` |
+| Redact | `omapdf redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
+| Delete annot | `omapdf delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
+| Markup / forms | `annotate`, `note`, `fill`, `sign` | `highlight`, `add_note`, `fill_field`, `place_signature` |
+
+Destructive MCP tools (`place_signature`, `delete_pages`, `redact`,
+`delete_annotation`) default to dry-run; pass `confirm=true` (or
+`confirmed=true` for signatures) after human approval.
+
 ## Conventions
 
 - **Pages are 1-based** everywhere a human or agent sees them.
@@ -141,5 +158,10 @@ indices are applied high-to-low so they stay valid. Report adds `type` and
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
 entry here + a test. Keep ops small and composable; a batch is the unit of
 atomicity.
+
+## Related docs
+
+- [preview-parity.md](preview-parity.md) — manual acceptance checklist
+- [roadmap.md](roadmap.md) — shipped vs next vs P2
 
 Planned: `stamp` (library images: APPROVED, initials). See docs/roadmap.md.
