@@ -13,7 +13,8 @@ Each op is available through `omapdf apply --ops file.json` and MCP
 | Op | CLI | MCP |
 |----|-----|-----|
 | Page list | `omapdf pages FILE --list` | `list_pages` |
-| Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages` |
+| Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`, `crop_pages` |
+| Crop page | `omapdf crop FILE --page N --rect …` | `crop_pages` |
 | Redact | `omapdf redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
 | Delete annot | `omapdf delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
 | Markup / forms | `annotate`, `note`, `fill`, `sign`, `shape` | `highlight`, `add_note`, `fill_field`, `place_signature`, `add_shape` |
@@ -100,6 +101,16 @@ Vector shape annotations (Preview-class markup). `shape` is one of `line`,
 `arrow`, `rect`, `oval`. Line and arrow need `from` and `to` points; rect and
 oval need `rect`. Renders as PDF Line, Square, or Circle annotations.
 `color` defaults to black; `width` defaults to 2pt. Report adds `rect` (bbox).
+
+### crop_pages
+```json
+{"op": "crop_pages", "pages": [1], "rect": [72, 80, 500, 750]}
+```
+Sets the PDF **CropBox** for each listed page — the visible page region in
+current page coordinates (top-left origin, same space as `omapdf read` rects).
+Does not auto-trim content to ink bounds; repeated crops stack in page space.
+Report: `{ "pages": [...], "rect": [...], "resolved": [{ "page", "cropbox",
+"size_before", "size_after" }, ...] }`.
 
 ### rotate_pages
 ```json

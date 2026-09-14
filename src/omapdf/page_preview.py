@@ -86,6 +86,9 @@ class PagePreviewState:
     def add_rotate_pages(self, pages: list[int], degrees: int):
         self.append_op({"op": "rotate_pages", "pages": pages, "degrees": degrees})
 
+    def add_crop_pages(self, pages: list[int], rect: list[float]):
+        self.append_op({"op": "crop_pages", "pages": pages, "rect": rect})
+
     def add_move_pages(self, pages: list[int], after: int):
         self.append_op({"op": "move_pages", "pages": pages, "after": after})
 

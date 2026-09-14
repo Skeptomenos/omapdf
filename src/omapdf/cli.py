@@ -145,6 +145,19 @@ def cmd_redact(args):
     _run_edit(args, [op])
 
 
+def cmd_crop(args):
+    if args.pages:
+        pages = pages_mod.parse_page_ranges(args.pages)
+    elif args.page:
+        pages = [args.page]
+    else:
+        raise OpError("crop needs --page or --pages")
+    _run_edit(
+        args,
+        [{"op": "crop_pages", "pages": pages, "rect": args.rect}],
+    )
+
+
 def cmd_shape(args):
     op = {"op": "shape", "page": args.page, "shape": args.shape}
     if args.shape in ("line", "arrow"):
@@ -366,6 +379,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _out_args(p)
     p.set_defaults(func=cmd_redact)
+
+    p = sub.add_parser("crop", help="set page CropBox (visible region) for one or more pages")
+    p.add_argument("pdf")
+    p.add_argument("--page", type=int, help="single page to crop (1-based)")
+    p.add_argument("--pages", metavar="PAGES", help="page list/ranges, e.g. 1,3-4")
+    p.add_argument(
+        "--rect",
+        type=_rect,
+        required=True,
+        help="crop region X0,Y0,X1,Y1 in current page points (top-left origin)",
+    )
+    _out_args(p)
+    p.set_defaults(func=cmd_crop)
 
     p = sub.add_parser("shape", help="add line, arrow, rectangle, or oval annotation")
     p.add_argument("pdf")

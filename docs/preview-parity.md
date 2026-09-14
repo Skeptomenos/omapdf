@@ -69,10 +69,18 @@ and **GTK editor** (`omapdf edit`) unless marked GUI-only.
 | 26 | MCP `add_shape` applies same geometry as CLI | ☐ |
 | 27 | GTK: Shapes tool drag → ghosts → Save → annots in `read` | ☐ |
 
+## Crop (M3 P2)
+
+| # | Check | Pass |
+|---|--------|------|
+| 28 | `omapdf crop --rect …` shrinks page CropBox; `read` size matches | ☑ |
+| 29 | Highlight/shape coords still align after crop (regression) | ☑ |
+| 30 | GTK: Crop tool drag → page aspect updates → Save persists | ☑ |
+
 ## Not in this checklist
 
 - **Engel-500** (real bank-statement redaction exam) — end-of-dev after M2, not Slice 6.
-- **P2:** crop, password, `sign --auto`, outline sidebar.
+- **P2:** password, `sign --auto`, outline sidebar.
 
 ## Quick commands
 
@@ -82,5 +90,6 @@ omapdf pages doc.pdf --list
 omapdf redact doc.pdf --page 1 --match "SECRET" -o out.pdf --dry-run --json
 omapdf delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
 omapdf shape doc.pdf --page 1 --shape rect --rect 72,100,200,180 -o out.pdf
+omapdf crop doc.pdf --page 1 --rect 50,50,500,750 -o out.pdf
 omapdf read out.pdf --json
 ```

@@ -277,6 +277,25 @@ def redact(
 
 
 @mcp.tool()
+def crop_pages(
+    path: str,
+    pages: list[int],
+    rect: list[float],
+    output: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Set the PDF CropBox for ``pages`` to ``rect`` ([x0, y0, x1, y1] in the
+    page's current coordinate space, top-left origin). Does not trim content —
+    it changes the visible page box."""
+    return engine.apply(
+        path,
+        [{"op": "crop_pages", "pages": pages, "rect": rect}],
+        output=output,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
 def add_shape(
     path: str,
     page: int,
