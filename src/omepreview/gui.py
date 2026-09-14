@@ -48,12 +48,14 @@ from .view_gestures import (
     SELECT_HANDLE_PAD,
     compute_pinch_focus,
     current_zoom_pct,
+    delete_selected_ghost,
     handle_hit_radius,
     hit_resize_handle,
     mapped_point,
     page_y_at_focus,
     pinch_live_pct,
     pinch_pixmap_scale,
+    popover_can_popup,
     popover_is_alive,
     resize_signature_keep_aspect,
     scroll_to_keep_focus,
@@ -758,6 +760,28 @@ class Editor:
         return hit_resize_handle(
             x, y, x0, y0, x1, y1, radius=handle_hit_radius(zoom)
         )
+
+    def delete_selected(self) -> bool:
+        """Delete the selected pending ghost (or mark a saved annot deleted)."""
+        if self.selected is None:
+            return False
+        if self.selected.get("kind") == "saved_annot":
+            self.checkpoint()
+            if not self._annot_marked_deleted(self.selected["page"], self.selected["index"]):
+                self.pending.append({
+                    "kind": "delete_annot",
+                    "page": self.selected["page"],
+                    "index": self.selected["index"],
+                    "rect": self.selected["rect"],
+                    "annot_type": self.selected["annot_type"],
+                })
+            self.selected = None
+            return True
+        if self.selected in self.pending:
+            self.checkpoint()
+            self.selected = delete_selected_ghost(self.pending, self.selected)
+            return True
+        return False
 
     def hit_widget(self, x, y):
         """Return an empty AcroForm text widget at (x, y), if any."""
@@ -1987,7 +2011,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 return
 
         def _sign_pop_popup() -> None:
-            if not _sign_pop_alive():
+            if not popover_can_popup(sign_pop):
                 return
             try:
                 sign_pop.popup()
@@ -2177,12 +2201,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         )
 
         def on_sign_clicked(_b):
+            sign_state["just_activated"] = False
             rebuild_sign_popover()
-            if sign_state["just_activated"]:
-                sign_state["just_activated"] = False
-                _sign_pop_popup()
-            elif ed.tool == "sign":
-                _sign_pop_popup()
+            _sign_pop_popup()
 
         sign_btn.connect("clicked", on_sign_clicked)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
@@ -2819,6 +2840,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 render_page(v_anchor=capture_v_anchor())
             elif keyval == Gdk.KEY_F9:
                 side_toggle.set_active(not side_toggle.get_active())
+            elif keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and ed.selected:
+                # Selected page ghosts (signatures, markup) beat sidebar page-delete.
+                # When the thumbnail rail is open this used to fall into the
+                # side_toggle branch and return without removing the ghost.
+                ed.delete_selected()
             elif side_toggle.get_active():
                 if ctrl and keyval == Gdk.KEY_v:
                     sidebar_api["paste_pages"]()
@@ -2861,21 +2887,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.selected = None
             elif keyval == Gdk.KEY_r and not ctrl:
                 set_tool("redact")
-            elif keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace) and ed.selected:
-                ed.checkpoint()
-                if ed.selected.get("kind") == "saved_annot":
-                    if not ed._annot_marked_deleted(ed.selected["page"], ed.selected["index"]):
-                        ed.pending.append({
-                            "kind": "delete_annot",
-                            "page": ed.selected["page"],
-                            "index": ed.selected["index"],
-                            "rect": ed.selected["rect"],
-                            "annot_type": ed.selected["annot_type"],
-                        })
-                    ed.selected = None
-                elif ed.selected in ed.pending:
-                    ed.pending.remove(ed.selected)
-                    ed.selected = None
             elif ctrl and keyval == Gdk.KEY_g:
                 page_btn.popup()
             elif keyval == Gdk.KEY_Page_Up:

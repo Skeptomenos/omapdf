@@ -14,6 +14,7 @@ from omepreview.view_gestures import (
     pinch_live_pct,
     pinch_pixmap_scale,
     page_y_at_focus,
+    popover_can_popup,
     popover_is_alive,
     scroll_to_keep_focus,
     signature_dnd_payload,
@@ -301,6 +302,11 @@ def test_popover_is_alive_skips_null_pointer_without_gtk_calls():
     assert popover_is_alive(_AlivePopover()) is True
     assert popover_is_alive(_UnrealizedPopover()) is False
     assert popover_is_alive(_OrphanPopover()) is False
+    assert popover_can_popup(_NullPopover()) is False
+    assert popover_can_popup(None) is False
+    assert popover_can_popup(_AlivePopover()) is True
+    assert popover_can_popup(_UnrealizedPopover()) is True
+    assert popover_can_popup(_OrphanPopover()) is False
 
 
 def test_pinch_begin_sets_state_after_focus():
