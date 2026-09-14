@@ -799,7 +799,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def refresh_title():
             dirty = ed.pending or ed.page_preview.has_changes()
             dot = " •" if dirty else ""
-            win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
+            win.set_title(f"{Path(ed.path).name}{dot} — omepreview")
             save_style_hook["fn"]()
 
         def viewport_width() -> float:

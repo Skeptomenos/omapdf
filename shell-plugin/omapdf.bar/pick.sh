@@ -1,11 +1,11 @@
 #!/bin/bash
-# Pick a recent PDF and open it. Bundled with the omapdf.bar Omarchy plugin
+# Pick a recent PDF and open it. Bundled with the omepreview Omarchy plugin
 # so the widget works standalone: prefers the omepreview editor when installed,
 # falls back to the system PDF handler otherwise.
 
 set -uo pipefail
 
-dirs="${OMAPDF_PICK_DIRS:-$HOME/Downloads:$HOME/Documents:$HOME/Desktop}"
+dirs="${OMEPREVIEW_PICK_DIRS:-${OMAPDF_PICK_DIRS:-$HOME/Downloads:$HOME/Documents:$HOME/Desktop}}"
 
 existing=()
 IFS=':' read -ra parts <<<"$dirs"

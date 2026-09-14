@@ -99,7 +99,7 @@ Annotations are standard-ish PDF markup. They remain editable in Preview after s
 | Rectangle redact | Drag a box over images or non-text. |
 | Warning | Apple tells users to duplicate first. Overlay shapes are **not** redaction. |
 
-True content removal is the requirement. Preview’s implementation is “good enough for most civilians,” not FOIA-grade. omapdf’s own roadmap already calls for true removal plus loud warnings.
+True content removal is the requirement. Preview’s implementation is “good enough for most civilians,” not FOIA-grade. omepreview’s own roadmap already calls for true removal plus loud warnings.
 
 ### 2.6 Security, export, images-in-PDF
 
@@ -293,7 +293,7 @@ If that loop works, Preview parity for the requested scope is done.
 
 ## 5. References
 
-- omepreview repository: https://github.com/pbergin11/omepreview
+- omepreview repository: https://github.com/Skeptomenos/omepreview
 - omepreview ops: `docs/ops.md`
 - omepreview roadmap: `docs/roadmap.md`
 - Apple: View PDFs in Preview — https://support.apple.com/guide/preview/view-pdfs-and-images-prvw11470/mac

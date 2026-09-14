@@ -6,7 +6,9 @@ import json
 import pymupdf
 
 from omepreview.page_clipboard import (
+    MIME_OMEPREVIEW_PAGES,
     MIME_OMAPDF_PAGES,
+    PAGE_CLIPBOARD_MIMES,
     pdf_bytes_from_clipboard_text,
     push_clipboard,
     read_clipboard_pdf_bytes,
@@ -14,6 +16,13 @@ from omepreview.page_clipboard import (
     write_pages_to_file,
 )
 from tests.data.make_docs import make_labeled_pdf
+
+
+def test_clipboard_mime_prefers_omepreview_accepts_legacy():
+    assert MIME_OMEPREVIEW_PAGES == "application/x-omepreview-pages"
+    assert MIME_OMAPDF_PAGES == "application/x-omapdf-pages"
+    assert PAGE_CLIPBOARD_MIMES[0] == MIME_OMEPREVIEW_PAGES
+    assert MIME_OMAPDF_PAGES in PAGE_CLIPBOARD_MIMES
 
 
 def test_serialize_and_parse_roundtrip(tmp_path):
@@ -40,6 +49,30 @@ def test_extract_pages_to_file(tmp_path):
     assert "PAGE 1" in out[0].get_text()
     assert "PAGE 5" in out[1].get_text()
     out.close()
+
+
+def test_paste_accepts_legacy_omapdf_mime(monkeypatch):
+    doc = pymupdf.open()
+    doc.new_page()
+    doc[0].insert_text((72, 72), "legacy mime")
+    json_bytes, pdf_bytes = serialize_pages(doc, [1])
+    doc.close()
+
+    monkeypatch.setattr(
+        "omepreview.page_clipboard._read_gtk_clipboard_mime", lambda _mime: None
+    )
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/bin/xclip" if name == "xclip" else None
+    )
+
+    def fake_xclip(mime):
+        if mime == MIME_OMAPDF_PAGES:
+            return json_bytes
+        return None
+
+    monkeypatch.setattr("omepreview.page_clipboard._read_xclip", fake_xclip)
+    got = read_clipboard_pdf_bytes()
+    assert got == pdf_bytes
 
 
 def test_gtk_clipboard_roundtrip():

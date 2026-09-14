@@ -206,10 +206,11 @@ def cmd_sig(args):
 
 
 def cmd_open(args):
-    # Opening a PDF means the omepreview editor. OMAPDF_VIEWER forces an external
-    # viewer instead — but never xdg-open: omepreview may itself be the desktop's
-    # default PDF handler, and xdg-open would loop straight back to us.
-    override = os.environ.get("OMAPDF_VIEWER")
+    # Opening a PDF means the omepreview editor. OMEPREVIEW_VIEWER (legacy
+    # OMAPDF_VIEWER) forces an external viewer instead — but never xdg-open:
+    # omepreview may itself be the desktop's default PDF handler, and
+    # xdg-open would loop straight back to us.
+    override = os.environ.get("OMEPREVIEW_VIEWER") or os.environ.get("OMAPDF_VIEWER")
     if override:
         cmd = [*shlex.split(override), args.pdf]
     else:
@@ -501,7 +502,7 @@ def main(argv=None) -> int:
     try:
         args.func(args)
     except (OpError, FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
-        print(f"omapdf: {exc}", file=sys.stderr)
+        print(f"omepreview: {exc}", file=sys.stderr)
         return 1
     return 0
 

@@ -1,10 +1,10 @@
 #!/bin/bash
 # Pick a PDF from the usual folders (recent first) and open it.
-# Used by the omapdf Omarchy bar widget; works standalone too.
+# Used by the omepreview Omarchy bar widget; works standalone too.
 
 set -uo pipefail
 
-dirs="${OMAPDF_PICK_DIRS:-$HOME/Downloads:$HOME/Documents:$HOME/Desktop}"
+dirs="${OMEPREVIEW_PICK_DIRS:-${OMAPDF_PICK_DIRS:-$HOME/Downloads:$HOME/Documents:$HOME/Desktop}}"
 
 existing=()
 IFS=':' read -ra parts <<<"$dirs"
@@ -22,7 +22,7 @@ if (( ${#existing[@]} > 0 )); then
 fi
 
 if (( ${#files[@]} == 0 )); then
-  notify-send "omapdf" "No PDFs found in ${dirs//:/, }"
+  notify-send "omepreview" "No PDFs found in ${dirs//:/, }"
   exit 0
 fi
 
@@ -37,8 +37,8 @@ choice="$(
 
 path="${choice#*$'\t'}"
 
-if command -v omapdf >/dev/null 2>&1; then
-  exec omapdf open "$path"
+if command -v omepreview >/dev/null 2>&1; then
+  exec omepreview open "$path"
 else
   exec xdg-open "$path"
 fi

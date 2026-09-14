@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pymupdf
 
-MIME_OMAPDF_PAGES = "application/x-omapdf-pages"
+MIME_OMEPREVIEW_PAGES = "application/x-omepreview-pages"
+MIME_OMAPDF_PAGES = "application/x-omapdf-pages"  # deprecated; accepted on paste
 MIME_PDF = "application/pdf"
+PAGE_CLIPBOARD_MIMES = (MIME_OMEPREVIEW_PAGES, MIME_OMAPDF_PAGES)
 
 
 def extract_pages_bytes(doc: pymupdf.Document, pages_1based: list[int]) -> bytes:
@@ -39,7 +41,7 @@ def serialize_pages(doc: pymupdf.Document, pages_1based: list[int]) -> tuple[byt
 
 
 def pdf_bytes_from_clipboard_text(text: str) -> bytes | None:
-    """Parse ``application/x-omapdf-pages`` JSON payload."""
+    """Parse ``application/x-omepreview-pages`` JSON payload (legacy MIME too)."""
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
@@ -89,7 +91,7 @@ def push_clipboard(json_bytes: bytes, pdf_bytes: bytes) -> None:
             display.get_clipboard().set(
                 Gdk.ContentProvider.new_union([
                     Gdk.ContentProvider.new_for_bytes(
-                        MIME_OMAPDF_PAGES, GLib.Bytes.new(json_bytes)
+                        MIME_OMEPREVIEW_PAGES, GLib.Bytes.new(json_bytes)
                     ),
                     Gdk.ContentProvider.new_for_bytes(
                         MIME_PDF, GLib.Bytes.new(pdf_bytes)
@@ -100,7 +102,7 @@ def push_clipboard(json_bytes: bytes, pdf_bytes: bytes) -> None:
         pass
     if shutil.which("xclip"):
         subprocess.run(
-            ["xclip", "-selection", "clipboard", "-t", MIME_OMAPDF_PAGES],
+            ["xclip", "-selection", "clipboard", "-t", MIME_OMEPREVIEW_PAGES],
             input=json_bytes,
             check=False,
         )
@@ -115,12 +117,12 @@ def read_clipboard_pdf_bytes() -> bytes | None:
     if shutil.which("xclip"):
         readers.append(_read_xclip)
     readers.append(_read_gtk_clipboard_mime)
-    for mime in (MIME_OMAPDF_PAGES, MIME_PDF):
+    for mime in (*PAGE_CLIPBOARD_MIMES, MIME_PDF):
         for read in readers:
             data = read(mime)
             if not data:
                 continue
-            if mime == MIME_OMAPDF_PAGES:
+            if mime in PAGE_CLIPBOARD_MIMES:
                 pdf = pdf_bytes_from_clipboard_text(data.decode("utf-8", errors="replace"))
                 if pdf:
                     return pdf

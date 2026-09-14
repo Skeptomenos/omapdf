@@ -30,13 +30,13 @@ omepreview edit /path/to/sample.pdf         # needs gtk4 + python-gobject
 | `depends` resolve | `python`, `python-pymupdf` on aarch64 |
 | `optdepends` | `python-mcp`, Omarchy bar paths in `optdepends` comment |
 | Desktop file | `share/omepreview.desktop` opens PDFs via `omepreview open` |
-| Bar widget | `cp /usr/share/omapdf/shell-plugin/omapdf.bar ~/.config/omarchy/plugins/` |
+| Bar widget | `cp /usr/share/omepreview/shell-plugin/omapdf.bar ~/.config/omarchy/plugins/` |
 | GTK editor | Page sidebar (F9), redact tool (R), form click-fill |
 
 ## PKGBUILD gaps to watch
 
 - `arch=('any')` — pure Python; no native compile, but PyMuPDF wheel must exist for aarch64 on Arch.
-- `pkgver` / `source` tarball — pin `sha256sums` on first tagged release (currently `SKIP`).
+- `pkgver` / `source` — PKGBUILD clones git `main`. There is no GitHub `v$pkgver` tarball; do not invent a release tag. Pin `sha256sums` when a tag exists.
 - Editor is not a hard `depends`; document `gtk4` + `python-gobject` for `omepreview edit` in README.
 
 ## Evidence

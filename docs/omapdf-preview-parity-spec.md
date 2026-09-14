@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-13  
 **Companion:** `omepreview`-preview-gap-analysis.md`  
-**Target tree:** pbergin11/omepreview (AGPL-3.0-or-later)  
+**Target tree:** Skeptomenos/omepreview (AGPL-3.0-or-later), forked from pbergin11/omapdf  
 **Stack:** Python ≥ 3.11, GTK4, PyMuPDF, existing JSON op engine  
 
-This spec adds Preview-class page handling and true redaction without replacing omapdf’s agent/ghost model.
+This spec adds Preview-class page handling and true redaction without replacing omepreview’s agent/ghost model.
 
 ---
 
@@ -166,7 +166,7 @@ Each row: page preview, page number, selection chrome.
 | Shift+click | Range select |
 | Drag on selected thumbnails | Reorder → `move_pages` ghost |
 | Delete / Backspace | `delete_pages` ghost |
-| Ctrl+C | Copy selected pages to `application/x-omapdf-pages` + a PDF fallback on the clipboard |
+| Ctrl+C | Copy selected pages to `application/x-omepreview-pages` + a PDF fallback on the clipboard |
 | Ctrl+V | `insert_pages` after the focused thumbnail (or end) |
 | Ctrl+X | copy + `delete_pages` |
 | Ctrl+R | rotate 90° CW; Shift+Ctrl+R CCW |
@@ -179,7 +179,7 @@ Visual: deleted pages ghost as struck / dimmed. Inserted pages ghost with a “+
 
 ### 3.2 Two windows
 
-Clipboard MIME: `application/x-omapdf-pages` = JSON `{ "n": N, "pdf_b64": "..." }` plus `application/pdf`.
+Clipboard MIME: `application/x-omepreview-pages` = JSON `{ "n": N, "pdf_b64": "..." }` plus `application/pdf`. Paste also accepts legacy `application/x-omapdf-pages`.
 
 Any omepreview editor instance must paste that. This is Preview’s two-window move.
 
@@ -358,7 +358,7 @@ Exit: two `omepreview edit` windows pass pages like Preview.
 - Tests 11–15.
 - Docs: “pen is not redact.”
 
-Exit: Censor-class removal inside omapdf.
+Exit: Censor-class removal inside omepreview.
 
 ### Slice 5 — forms + annot delete (1–2 days)
 

@@ -31,7 +31,7 @@ BarWidget {
     text: root.icon
     slotSize: Style.bar.statusSlot
     fontSize: Style.font.caption
-    tooltipText: "Open a PDF (omapdf)"
+    tooltipText: "Open a PDF (omepreview)"
     onPressed: if (root.bar) root.bar.run(root.command)
   }
 }

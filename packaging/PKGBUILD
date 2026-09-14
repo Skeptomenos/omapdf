@@ -11,17 +11,19 @@ optdepends=(
   'python-mcp: MCP server for AI agents (omepreview-mcp)'
   'omarchy: bar widget and menu-based PDF picker'
 )
-makedepends=('python-build' 'python-installer' 'python-hatchling')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')  # pin on first tagged release
+makedepends=('git' 'python-build' 'python-installer' 'python-hatchling')
+# No GitHub release tag exists. Do not use archive/v$pkgver — that tarball
+# is not published. Package current main.
+source=("$pkgname::git+$url.git#branch=main")
+sha256sums=('SKIP')
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm755 bin/omepreview-pick "$pkgdir/usr/bin/omepreview-pick"

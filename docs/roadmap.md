@@ -39,7 +39,7 @@
   `extract_pages` — engine, CLI (`omepreview pages`), MCP, tests
 - [x] GTK thumbnail sidebar: multi-select, drag reorder, delete/rotate
   shortcuts, context menu, file-drop insert, extract dialog, scratch preview
-- [x] Two-window page clipboard (`application/x-omapdf-pages` + PDF fallback);
+- [x] Two-window page clipboard (`application/x-omepreview-pages` + PDF fallback; legacy `application/x-omapdf-pages` still pastes);
   Ctrl+C/V/X when sidebar focused
 
 **Preview parity — safe share (M2)**
@@ -80,7 +80,7 @@
 
 ## Distribution
 
-1. GitHub (repo URL placeholder: omapdf/omapdf), AUR package
+1. GitHub ([Skeptomenos/omepreview](https://github.com/Skeptomenos/omepreview)), AUR package
    (`packaging/PKGBUILD`) — see [packaging/SMOKE-aarch64.md](../packaging/SMOKE-aarch64.md)
    for aarch64/Omarchy smoke steps
 2. Omarchy plugin listing for the bar widget

@@ -41,7 +41,7 @@ def list_form_fields(path: str) -> list[dict]:
 @mcp.tool()
 def apply_ops(path: str, ops: list[dict], output: str | None = None, dry_run: bool = False) -> dict:
     """Apply a list of operations (highlight, note, text_box, fill_field,
-    place_signature) in one atomic edit. See omapdf's ops spec. Prefer this
+    place_signature) in one atomic edit. See omepreview's ops spec. Prefer this
     over many single calls when making several edits."""
     return engine.apply(path, ops, output=output, dry_run=dry_run)
 

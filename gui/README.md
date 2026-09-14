@@ -36,7 +36,7 @@ compiled UI code. This directory holds its design notes.
   colored by the widget's foreground (theme-proof); the pen icon draws in
   the current ink color and doubles as the color indicator.
 - **File watcher**: a `Gio.FileMonitor` reloads doc + thumbnails on
-  external changes, guarded against omapdf's own writes (save/undo/redo).
+  external changes, guarded against omepreview's own writes (save/undo/redo).
 - **Comments**: clicking near a saved annotation (select tool) pops its
   content — values are copied out of the PyMuPDF annot objects inside the
   iteration loop (they can go stale), and the popover opens via

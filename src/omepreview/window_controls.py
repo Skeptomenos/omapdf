@@ -21,9 +21,18 @@ def detect_omarchy_environment() -> bool:
     return False
 
 
+def _env_first(*names: str) -> str | None:
+    """First non-empty value among *names* (later names are deprecated aliases)."""
+    for name in names:
+        val = os.environ.get(name)
+        if val:
+            return val
+    return None
+
+
 def window_controls_enabled() -> bool:
     """Whether omepreview should show a thin HeaderBar with min/max/close only."""
-    override = os.environ.get("OMAPDF_WINDOW_CONTROLS")
+    override = _env_first("OMEPREVIEW_WINDOW_CONTROLS", "OMAPDF_WINDOW_CONTROLS")
     if override == "1":
         return True
     if override == "0":
