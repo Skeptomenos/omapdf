@@ -1,4 +1,4 @@
-# omapdf
+# omapreview
 
 - `Ownership-ID: Personal`. Load `ownership-profile-personal` when not already present.
 - Agent-native PDF tool: GTK4 editor + CLI + MCP server over one PyMuPDF op engine.
@@ -11,14 +11,14 @@
 
 ## Navigate
 
-- `src/omapdf/ops.py` schema, `src/omapdf/engine.py` sole write-path (`apply()`), `src/omapdf/cli.py`, `src/omapdf/mcp_server.py`.
-- `src/omapdf/gui.py` editor — pending ghosts in `Editor.pending`, `Editor.to_ops()` on Save; rendering notes in `gui/README.md`.
+- `src/omapreview/ops.py` schema, `src/omapreview/engine.py` sole write-path (`apply()`), `src/omapreview/cli.py`, `src/omapreview/mcp_server.py`.
+- `src/omapreview/gui.py` editor — pending ghosts in `Editor.pending`, `Editor.to_ops()` on Save; rendering notes in `gui/README.md`.
 - `docs/ops.md` stable op contract, `docs/roadmap.md` status, `docs/omapdf-preview-parity-spec.md` + `docs/omapdf-preview-gap-analysis.md` page-surgery plan.
 - `tests/test_engine.py`, `skill/SKILL.md` agent playbook, `shell-plugin/omapdf.bar` bar widget, `packaging/PKGBUILD`.
 
 ## Bindings
 
-- Linear: `omapdf` (AI Development). Live issue/branch: `index.md`.
+- Linear: `omapreview`` (AI Development). Live issue/branch: `index.md`.
 
 ## Rules
 

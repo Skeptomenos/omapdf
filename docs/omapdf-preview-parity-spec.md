@@ -1,8 +1,8 @@
-# omapdf Preview-Parity SPEC and Implementation Plan
+# omapreview Preview-Parity SPEC and Implementation Plan
 
 **Date:** 2026-09-13  
-**Companion:** `omapdf-preview-gap-analysis.md`  
-**Target tree:** pbergin11/omapdf (AGPL-3.0-or-later)  
+**Companion:** `omapreview`-preview-gap-analysis.md`  
+**Target tree:** pbergin11/omapreview (AGPL-3.0-or-later)  
 **Stack:** Python ≥ 3.11, GTK4, PyMuPDF, existing JSON op engine  
 
 This spec adds Preview-class page handling and true redaction without replacing omapdf’s agent/ghost model.
@@ -11,7 +11,7 @@ This spec adds Preview-class page handling and true redaction without replacing 
 
 ## 0. Goal
 
-Make `omapdf edit` the Linux default PDF app for:
+Make `omapreview edit` the Linux default PDF app for:
 
 - add / remove / reorder / rotate pages
 - copy and paste pages between two windows
@@ -39,7 +39,7 @@ Non-goals for this spec: PAdES, image-editor Preview features, Continuity Camera
 
 ## 2. New operations
 
-Add to `src/omapdf/ops.py`, appliers in `engine.py`, schema tests, and `docs/ops.md`.
+Add to `src/omapreview/ops.py`, appliers in `engine.py`, schema tests, and `docs/ops.md`.
 
 ### 2.1 `rotate_pages`
 
@@ -181,7 +181,7 @@ Visual: deleted pages ghost as struck / dimmed. Inserted pages ghost with a “+
 
 Clipboard MIME: `application/x-omapdf-pages` = JSON `{ "n": N, "pdf_b64": "..." }` plus `application/pdf`.
 
-Any omapdf editor instance must paste that. This is Preview’s two-window move.
+Any omapreview editor instance must paste that. This is Preview’s two-window move.
 
 ### 3.3 Redact tool
 
@@ -227,15 +227,15 @@ Focus rule: if the sidebar has a page selection, keys apply to pages. Otherwise 
 ### 4.1 CLI
 
 ```
-omapdf pages input.pdf --list
-omapdf pages input.pdf --delete 1,4-6 -o out.pdf
-omapdf pages input.pdf --rotate 90 --pages 2,3 -o out.pdf
-omapdf pages input.pdf --move 5-6 --after 1 -o out.pdf
-omapdf pages dest.pdf --insert src.pdf --src-pages 1-3 --after 2 -o out.pdf
-omapdf pages dest.pdf --blank --after 0 -o out.pdf
-omapdf pages in.pdf --extract 2-5 -o excerpt.pdf
-omapdf redact in.pdf --page 1 --match "SSN" -o out.pdf
-omapdf redact in.pdf --page 1 --rect 72,400,300,430 -o out.pdf
+omapreview pages input.pdf --list
+omapreview pages input.pdf --delete 1,4-6 -o out.pdf
+omapreview pages input.pdf --rotate 90 --pages 2,3 -o out.pdf
+omapreview pages input.pdf --move 5-6 --after 1 -o out.pdf
+omapreview pages dest.pdf --insert src.pdf --src-pages 1-3 --after 2 -o out.pdf
+omapreview pages dest.pdf --blank --after 0 -o out.pdf
+omapreview pages in.pdf --extract 2-5 -o excerpt.pdf
+omapreview redact in.pdf --page 1 --match "SSN" -o out.pdf
+omapreview redact in.pdf --page 1 --rect 72,400,300,430 -o out.pdf
 ```
 
 `--dry-run --json` on all of the above.
@@ -321,11 +321,11 @@ Work in vertical slices. **Every milestone (M1 page knife, M2 safe share, M3 dai
 ### Slice 1 — page engine + CLI + MCP (2–3 days)
 
 - Implement `rotate_pages`, `delete_pages`, `move_pages`, `insert_pages` (PDF source + blank + image), `extract_pages`.
-- `omapdf pages ...` command with `--dry-run --json`.
+- `omapreview pages ...` command with `--dry-run --json`.
 - MCP: `list_pages`, `delete_pages` (dry-run default), `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`.
 - Tests 1–8 plus MCP dry-run/apply coverage.
-- Regression: `omapdf edit` still launches (no sidebar page ops yet).
-- Manual: `omapdf pages a.pdf --insert b.pdf --after 1 -o out.pdf`.
+- Regression: `omapreview edit` still launches (no sidebar page ops yet).
+- Manual: `omapreview pages a.pdf --insert b.pdf --after 1 -o out.pdf`.
 
 Exit: CLI and MCP page surgery work on aarch64 with system `python-pymupdf`.
 
@@ -347,7 +347,7 @@ Exit: one window can delete, rotate, reorder, insert blank, insert file. Undo wo
 - Drag thumbnails to Nautilus / Nemo / Cosmic Files / `xdg-desktop-portal` drop — best effort; if portal is painful, “Extract…” file dialog is enough for v1.
 - Image-as-page drop.
 
-Exit: two `omapdf edit` windows pass pages like Preview.
+Exit: two `omapreview edit` windows pass pages like Preview.
 
 ### Slice 4 — redaction (2–3 days)
 
@@ -426,4 +426,4 @@ One PR, engine only:
 
 > feat(ops): rotate_pages, delete_pages, move_pages, insert_pages, extract_pages
 
-No GUI. Unblocks agents and the editor work. Matches how omapdf already ships features (engine → CLI → GUI).
+No GUI. Unblocks agents and the editor work. Matches how omapreview already ships features (engine → CLI → GUI).

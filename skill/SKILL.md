@@ -1,11 +1,11 @@
 ---
-name: omapdf
+name: omapreview
 description: Do anything with a PDF that a person would ask an assistant to do — review and highlight what matters, mark up or annotate anything, fill forms, sign, initial, stamp, redline, cross out, flatten, extract or summarize with page citations. Triggers: any request involving a PDF — "sign this", "fill this out", "highlight everything I need to know", "mark up", "go through this document", "review this contract/lease/agreement", "annotate", "add a note", "cross out", "check off", "redline", "flatten", "what does this PDF say", "signature".
 ---
 
-# omapdf — the PDF assistant playbook
+# omapreview — the PDF assistant playbook
 
-omapdf edits PDFs through a JSON op engine (`omapdf` CLI; the `omapdf` MCP
+omapreview edits PDFs through a JSON op engine (`omapreview`` CLI; the `omapreview`` MCP
 server exposes the same engine). Treat ANY request a person would make about
 a paper document as executable: if a human with a pen and a highlighter could
 do it, you can do it — and you can also *look at the page* to work precisely.
@@ -21,31 +21,31 @@ The signature flow taught the pattern: **anchor → look → dry-run → verify 
 (if aesthetic/consequential) hand a ghost to the human.** Climb only as high
 as the task needs:
 
-1. **Text anchors.** `omapdf read doc.pdf` gives every text block + bbox and
+1. **Text anchors.** `omapreview read doc.pdf` gives every text block + bbox and
    every form field + rect. `highlight --match` needs no coordinates at all.
    Compute positions *relative to* known bboxes (e.g. signature goes just
    above the "SIGNATURE" label's bbox; a check goes at the checkbox rect).
 2. **Use your eyes.** When text blocks don't pin it down (image-heavy pages,
    empty regions, "next to the logo", column layouts):
-   `omapdf snapshot doc.pdf --page N --grid 50` → Read the PNG → the labeled
+   `omapreview snapshot doc.pdf --page N --grid 50` → Read the PNG → the labeled
    grid IS the ops coordinate system. Pick numbers off it.
 3. **Dry-run.** Every edit command takes `--dry-run --json` and returns
    resolved geometry without writing. Sanity-check rects fit the page and
    don't cover content you must keep readable.
 4. **Verify after writing.** For anything nontrivial, write to a copy
-   (`-o out.pdf`), then `omapdf snapshot out.pdf --page N` (no grid) and
+   (`-o out.pdf`), then `omapreview snapshot out.pdf --page N` (no grid) and
    *look at the result*. Wrong spot, overlapping text, too big? Fix the op
    and re-apply to a fresh copy from the original. Never ship what you
    haven't seen.
 5. **Ghost handoff.** For placements where taste matters (signatures, stamps
    on a designed page) or when the user should have final say: write the
-   proposed ops to JSON and `setsid -f omapdf edit doc.pdf --ops proposal.json`
+   proposed ops to JSON and `setsid -f omapreview edit doc.pdf --ops proposal.json`
    — they load as selected, draggable overlays; the user nudges and Saves.
 
 ## Task recipes
 
 **"Go through this and highlight everything I need to know"** — the flagship.
-1. `omapdf read doc.pdf --text-only` — read the WHOLE document, every page.
+1. `omapreview read doc.pdf --text-only` — read the WHOLE document, every page.
 2. Identify what a diligent professional would flag: money (amounts, fees,
    penalties), dates and deadlines, obligations ("shall", "must", "agrees
    to"), auto-renewals, termination/cancellation terms, liability and
@@ -62,7 +62,7 @@ as the task needs:
 on a page; loop the pages where `read` shows the term. Verify the count you
 report matches the rects returned.
 
-**Fill a form** — `omapdf fields form.pdf` for names/types/rects. Fill every
+**Fill a form** — `omapreview fields form.pdf` for names/types/rects. Fill every
 field you have facts for in one `apply` batch. Never invent values: leave
 unknown fields empty and list them for the user. No AcroForm fields? Use
 `text_box` placed by the ladder (label bboxes → grid snapshot).
@@ -70,7 +70,7 @@ unknown fields empty and list them for the user. No AcroForm fields? Use
 **Sign / initial** — signature lines come from field rects (`signature`
 type), "SIGNATURE"/"Sign here"/"X___" labels, or the grid snapshot. Dry-run,
 then apply, then verify with a snapshot. "Initial every page": a saved
-`initials` signature (`omapdf sig add ... --name initials`) placed at a
+`initials` signature (`omapreview sig add ... --name initials`) placed at a
 consistent corner on every page in one batch. Never place a signature the
 user hasn't asked for; offer the ghost handoff when placement is aesthetic.
 
@@ -97,7 +97,7 @@ removals) and summarize.
 allow (email, Slack, etc.), "sign it and send it to X" is one flow: finalize
 (usually `flatten -o final.pdf`), attach, send — confirming recipient and
 message before sending, and reporting exactly what was sent. Humans also have
-a Share menu in `omapdf edit` (email attach, LocalSend, copy-file,
+a Share menu in `omapreview edit` (email attach, LocalSend, copy-file,
 show-in-folder).
 
 ## Discipline
@@ -111,12 +111,12 @@ show-in-folder).
 - **Keep originals.** Use `-o` for signing, flattening, and anything the
   user may want to redo; edit in place only for additive annotation the user
   asked for on that file.
-- **Finish for sending:** offer `omapdf flatten out.pdf -o final.pdf` when
+- **Finish for sending:** offer `omapreview flatten out.pdf -o final.pdf` when
   the copy is going to someone else; keep the unflattened version.
 - Password-protected PDFs are refused — ask the user to decrypt.
-- No signature saved? `omapdf sig draw` opens the drawing window. Never
+- No signature saved? `omapreview sig draw` opens the drawing window. Never
   fabricate a signature, never sign unbidden, never invent form data.
 - Visual signing only; cryptographic (certificate) signing is on the
   roadmap — say so, don't improvise it.
-- `omapdf open doc.pdf` opens the omapdf editor for the user (detach GUI
+- `omapreview open doc.pdf` opens the omapreview editor for the user (detach GUI
   launches: `setsid -f`).

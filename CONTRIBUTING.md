@@ -1,4 +1,4 @@
-# Contributing to omapdf
+# Contributing to omapreview
 
 Contributions welcome — this project is young and the surface area is small
 on purpose.
@@ -6,7 +6,7 @@ on purpose.
 ## Setup
 
 ```bash
-git clone https://github.com/pbergin11/omapdf && cd omapdf
+git clone https://github.com/pbergin11/omapreview && cd omapreview
 python -m venv --system-site-packages .venv   # system PyGObject for the editor
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest tests/ -q
@@ -18,7 +18,7 @@ in well under a second. Keep it that way.
 ## The one rule
 
 **Everything goes through the op engine.** New capability = new op (schema in
-`src/omapdf/ops.py`, applier in `src/omapdf/engine.py`, spec in `docs/ops.md`,
+`src/omapreview/ops.py`, applier in `src/omapreview/engine.py`, spec in `docs/ops.md`,
 test in `tests/`). Then the CLI, MCP server, and GUI each get it as a thin
 wrapper. If a feature can't be expressed as an op applied to a document,
 question the feature.

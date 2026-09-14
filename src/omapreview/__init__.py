@@ -1,4 +1,4 @@
-"""omapdf — agent-native PDF annotation and signing for Linux.
+"""omapreview — agent-native PDF annotation and signing for Linux.
 
 One operations API, two clients: humans (CLI/GUI) and agents (CLI/MCP).
 """

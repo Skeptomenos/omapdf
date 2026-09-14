@@ -47,7 +47,7 @@ def prove_cli(work: Path) -> dict:
     src = make_form_pdf(work / "cli_source.pdf")
     before = json.loads(
         subprocess.check_output(
-            [sys.executable, "-m", "omapdf.cli", "read", str(src), "--json"],
+            [sys.executable, "-m", "omapreview.cli", "read", str(src), "--json"],
             text=True,
         )
     )
@@ -56,7 +56,7 @@ def prove_cli(work: Path) -> dict:
         [
             sys.executable,
             "-m",
-            "omapdf.cli",
+            "omapreview.cli",
             "delete-annotation",
             str(src),
             "--page",
@@ -74,7 +74,7 @@ def prove_cli(work: Path) -> dict:
     delete_report = json.loads(proc.stdout)
     after = json.loads(
         subprocess.check_output(
-            [sys.executable, "-m", "omapdf.cli", "read", str(out), "--json"],
+            [sys.executable, "-m", "omapreview.cli", "read", str(out), "--json"],
             text=True,
         )
     )
@@ -83,7 +83,7 @@ def prove_cli(work: Path) -> dict:
         [
             sys.executable,
             "-m",
-            "omapdf.cli",
+            "omapreview.cli",
             "fill",
             str(src),
             "--field",
@@ -99,7 +99,7 @@ def prove_cli(work: Path) -> dict:
     )
     filled = json.loads(
         subprocess.check_output(
-            [sys.executable, "-m", "omapdf.cli", "read", str(fill_out), "--json"],
+            [sys.executable, "-m", "omapreview.cli", "read", str(fill_out), "--json"],
             text=True,
         )
     )
@@ -115,7 +115,7 @@ def prove_cli(work: Path) -> dict:
 
 
 def prove_mcp(work: Path) -> dict:
-    from omapdf import mcp_server, read
+    from omapreview import mcp_server, read
 
     src = make_form_pdf(work / "mcp_source.pdf")
     dry = mcp_server.delete_annotation(str(src), page=1, index=0, confirm=False)
@@ -141,7 +141,7 @@ def prove_mcp(work: Path) -> dict:
 def prove_gtk(work: Path) -> dict:
     import shutil
 
-    from omapdf import engine, read
+    from omapreview import engine, read
 
     src = make_form_pdf(work / "gtk_source.pdf")
     # Mirrors Editor.to_ops() after a field-fill ghost and delete-annot ghost.

@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "omapdf"
+name = "omapreview"
 version = "0.1.0"
-description = "Agent-native PDF annotation and signing for Linux"
+description = "Preview-style PDF viewer and reviewer for Linux"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.11"
@@ -20,11 +20,11 @@ mcp = ["mcp>=1.2"]
 dev = ["pytest", "mcp>=1.2"]
 
 [project.scripts]
-omapdf = "omapdf.cli:main"
-omapdf-mcp = "omapdf.mcp_server:main"
+omapreview = "omapreview.cli:main"
+omapreview-mcp = "omapreview.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/pbergin11/omapdf"
+Homepage = "https://github.com/Skeptomenos/omapreview"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omapdf"]
+packages = ["src/omapreview"]

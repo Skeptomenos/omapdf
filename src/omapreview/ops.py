@@ -16,7 +16,7 @@ Op reference (see docs/ops.md for the full spec):
 
 Pages are 1-based everywhere a human or agent sees them. Coordinates are PDF
 points (1/72 inch) with the origin at the TOP-LEFT of the page, matching what
-`omapdf read` reports.
+`omapreview read` reports.
 """
 
 from __future__ import annotations

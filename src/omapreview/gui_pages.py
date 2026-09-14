@@ -407,7 +407,7 @@ def build_page_sidebar(
     def paste_pages() -> bool:
         pdf_bytes = read_clipboard_pdf_bytes()
         if not pdf_bytes:
-            toast("Clipboard has no omapdf pages")
+            toast("Clipboard has no omapreview pages")
             return False
         after = insert_after_focus()
         tmp = write_temp_pdf(pdf_bytes)

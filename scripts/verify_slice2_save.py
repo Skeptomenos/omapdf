@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omapdf import engine, pages as pages_mod
-from omapdf.page_preview import PagePreviewState
+from omapreview import engine, pages as pages_mod
+from omapreview.page_preview import PagePreviewState
 from tests.data.make_docs import make_labeled_pdf
 
 EVIDENCE = Path(

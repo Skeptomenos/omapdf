@@ -1,4 +1,4 @@
-"""omapdf edit — the GTK4 editor.
+"""omapreview edit — the GTK4 editor.
 
 A thin client over the op engine, like everything else: tools build *pending
 items* (ghosts) that are drawn over the rendered page; Save converts them to
@@ -16,6 +16,7 @@ import copy
 import io
 import json
 import math
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -30,7 +31,7 @@ try:
     gi.require_foreign("cairo")
 except (ImportError, ValueError) as exc:
     raise SystemExit(
-        "omapdf edit needs PyGObject cairo integration — install python3-gi-cairo "
+        "omapreview edit needs PyGObject cairo integration — install python3-gi-cairo "
         "(Debian/Ubuntu) or ensure python-gobject is built with cairo support."
     ) from exc
 import cairo
@@ -748,7 +749,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
     _sync_color_scheme()
     ed = Editor(pdf, ops_file)
     app = Gtk.Application(
-        application_id="org.omapdf.Editor", flags=Gio.ApplicationFlags.NON_UNIQUE
+        application_id="org.omapreview.Editor", flags=Gio.ApplicationFlags.NON_UNIQUE
     )
 
     def on_activate(app):
@@ -1239,8 +1240,20 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     prompt_note(px, py)
             elif ed.tool == "sign":
                 if ed._ensure_sig() is None:
-                    toast("No signature saved — run: omapdf sig draw")
-                    return
+                    import subprocess
+
+                    toast("Record your signature on the trackpad…")
+                    proc = subprocess.run(
+                        [sys.executable, "-m", "omapreview.cli", "sig", "draw"],
+                        env=os.environ.copy(),
+                    )
+                    ed.sig_surface = None
+                    if proc.returncode != 0:
+                        toast("Signature capture cancelled")
+                        return
+                    toast("Signature saved — click to place")
+                    if ed._ensure_sig() is None:
+                        return
                 ed.checkpoint()
                 w = 160.0
                 item = {"kind": "sig", "page": ed.page_no, "x": px - w / 2,
@@ -1968,7 +1981,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ask_entry.set_text("")
             prompt = (
                 f"{question}\n\nThe document is the PDF at \"{ed.path}\" — "
-                "use omapdf to read or mark it up. It is open in the omapdf "
+                "use omapreview to read or mark it up. It is open in the omapreview "
                 "editor, which auto-reloads when you save changes to it."
             )
             try:
@@ -2125,7 +2138,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         toast_revealer.set_halign(Gtk.Align.CENTER)
         toast_revealer.set_valign(Gtk.Align.END)
         toast_state = {"timeout": 0}
-        # Suppresses the disk watcher while omapdf itself writes the file.
+        # Suppresses the disk watcher while omapreview itself writes the file.
         write_guard = {"until": 0}
 
         def mark_self_write():
@@ -2663,7 +2676,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 (surf.get_width(), surf.get_height()) if surf is not None else None
             )
             print(
-                f"omapdf layout: toolbar={toolbar_w} scroller={scroll_w} "
+                f"omapreview layout: toolbar={toolbar_w} scroller={scroll_w} "
                 f"drawing_area={area_w}x{area_h} page_surface={surf_sz} zoom={ed.zoom:.3f}",
                 file=sys.stderr,
                 flush=True,
@@ -2691,7 +2704,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 def main(argv=None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
-        print("usage: python -m omapdf.gui <doc.pdf> [ops.json]", file=sys.stderr)
+        print("usage: python -m omapreview.gui <doc.pdf> [ops.json]", file=sys.stderr)
         return 2
     return run(args[0], args[1] if len(args) > 1 else None)
 

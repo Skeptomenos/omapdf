@@ -7,8 +7,8 @@ import sys
 import pymupdf
 import pytest
 
-from omapdf import engine, read
-from omapdf.ops import OpError
+from omapreview import engine, read
+from omapreview.ops import OpError
 
 
 @pytest.fixture()
@@ -109,7 +109,7 @@ def test_cli_delete_annotation(marked_pdf, tmp_path):
         [
             sys.executable,
             "-m",
-            "omapdf.cli",
+            "omapreview.cli",
             "delete-annotation",
             str(marked_pdf),
             "--page",

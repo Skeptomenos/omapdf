@@ -49,7 +49,7 @@ def prove_cli(work: Path) -> dict:
         [
             sys.executable,
             "-m",
-            "omapdf.cli",
+            "omapreview.cli",
             "redact",
             str(src),
             "--page",
@@ -70,7 +70,7 @@ def prove_cli(work: Path) -> dict:
     ptext = pdftotext(out)
     result = {
         "surface": "cli",
-        "command": "omapdf redact --page 1 --match SECRET",
+        "command": "omapreview redact --page 1 --match SECRET",
         "report": report,
         "get_text_has_secret": "SECRET" in text,
         "pdftotext_has_secret": "SECRET" in ptext if ptext else None,
@@ -82,7 +82,7 @@ def prove_cli(work: Path) -> dict:
 
 
 def prove_mcp(work: Path) -> dict:
-    from omapdf import engine, mcp_server
+    from omapreview import engine, mcp_server
 
     src = make_secret_pdf(work / "mcp_source.pdf")
     dry = mcp_server.redact(str(src), page=1, match="SECRET", confirm=False)
@@ -107,7 +107,7 @@ def prove_mcp(work: Path) -> dict:
 
 
 def prove_ink_not_redact(work: Path) -> dict:
-    from omapdf import engine
+    from omapreview import engine
 
     src = make_secret_pdf(work / "ink_source.pdf")
     doc = pymupdf.open(src)
@@ -140,7 +140,7 @@ def prove_ink_not_redact(work: Path) -> dict:
 
 
 def prove_image_rect(work: Path) -> dict:
-    from omapdf import engine
+    from omapreview import engine
 
     img = make_image_asset(work / "chip.png")
     src = make_image_only_page_pdf(work / "image_source.pdf", img)
@@ -169,7 +169,7 @@ def prove_gtk(work: Path) -> dict:
     gi.require_version("Gtk", "4.0")
     from gi.repository import GLib, Gtk
 
-    from omapdf.gui import Editor
+    from omapreview.gui import Editor
 
     src = make_secret_pdf(work / "gtk_source.pdf")
     ed_holder: dict = {}
@@ -192,14 +192,14 @@ def prove_gtk(work: Path) -> dict:
         win.close()
         app.quit()
 
-    app = Gtk.Application(application_id="org.omapdf.Slice4Proof")
+    app = Gtk.Application(application_id="org.omapreview.Slice4Proof")
     app.connect("activate", on_activate)
     app.run(None)
 
     ed = ed_holder["ed"]
     redacted = work / "gtk_source_redacted.pdf"
     shutil.copy2(src, redacted)
-    from omapdf import engine
+    from omapreview import engine
 
     engine.apply(redacted, ed.to_ops(), output=redacted)
     text = pymupdf.open(redacted)[0].get_text()

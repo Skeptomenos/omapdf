@@ -1,6 +1,6 @@
 """Unit tests for scratch page-preview state."""
 
-from omapdf.page_preview import PagePreviewState
+from omapreview.page_preview import PagePreviewState
 from tests.data.make_docs import make_labeled_pdf
 
 

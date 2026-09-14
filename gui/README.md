@@ -1,8 +1,8 @@
-# The omapdf editor
+# The omapreview editor
 
-The editor lives at [`src/omapdf/gui.py`](../src/omapdf/gui.py) and launches
-with `omapdf edit doc.pdf` (also the target of `omapdf open` and the
-`omapdf.desktop` handler). It is GTK4 + cairo + PyMuPDF — pure Python, no
+The editor lives at [`src/omapreview/gui.py`](../src/omapreview/gui.py) and launches
+with `omapreview edit doc.pdf` (also the target of `omapreview open` and the
+`omapreview.desktop` handler). It is GTK4 + cairo + PyMuPDF — pure Python, no
 compiled UI code. This directory holds its design notes.
 
 ## Design principles (all hold today)

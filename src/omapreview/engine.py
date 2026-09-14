@@ -33,7 +33,7 @@ def _apply_highlight(doc, op) -> dict:
         if not rects:
             raise OpError(
                 f"text {op['match']!r} not found on page {op['page']}; "
-                "run `omapdf read` to see the page's actual text"
+                "run `omapreview read` to see the page's actual text"
             )
     else:
         rects = [pymupdf.Rect(op["rect"])]
@@ -346,7 +346,7 @@ def _apply_delete_annotation(doc, op, *, dry_run: bool) -> dict:
     if index >= len(annots):
         raise OpError(
             f"annotation index {index} out of range on page {op['page']} "
-            f"(page has {len(annots)} annotation(s); run `omapdf read` to list them)"
+            f"(page has {len(annots)} annotation(s); run `omapreview read` to list them)"
         )
     annot = annots[index]
     result = {
@@ -371,7 +371,7 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
         if not rects:
             raise OpError(
                 f"text {match!r} not found on page {op['page']}; "
-                "run `omapdf read` to see the page's actual text"
+                "run `omapreview read` to see the page's actual text"
             )
         verify_match = match
     else:

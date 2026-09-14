@@ -1,22 +1,22 @@
-# The omapdf operations spec
+# The omapreview operations spec
 
 A document edit is a JSON array of operation objects. This vocabulary is the
 project's stable contract: the CLI, MCP server, and GUI are all clients of it,
-and third-party tools are welcome to speak it directly (`omapdf apply doc.pdf
+and third-party tools are welcome to speak it directly (`omapreview apply doc.pdf
 --ops ops.json`).
 
 ## CLI and MCP
 
-Each op is available through `omapdf apply --ops file.json` and MCP
+Each op is available through `omapreview apply --ops file.json` and MCP
 `apply_ops`. Convenience wrappers:
 
 | Op | CLI | MCP |
 |----|-----|-----|
-| Page list | `omapdf pages FILE --list` | `list_pages` |
-| Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`, `crop_pages` |
-| Crop page | `omapdf crop FILE --page N --rect …` | `crop_pages` |
-| Redact | `omapdf redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
-| Delete annot | `omapdf delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
+| Page list | `omapreview pages FILE --list` | `list_pages` |
+| Page surgery | `omapreview pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`, `crop_pages` |
+| Crop page | `omapreview crop FILE --page N --rect …` | `crop_pages` |
+| Redact | `omapreview redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
+| Delete annot | `omapreview delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
 | Markup / forms | `annotate`, `note`, `fill`, `sign`, `shape` | `highlight`, `add_note`, `fill_field`, `place_signature`, `add_shape` |
 
 Destructive MCP tools (`place_signature`, `delete_pages`, `redact`,
@@ -27,7 +27,7 @@ Destructive MCP tools (`place_signature`, `delete_pages`, `redact`,
 
 - **Pages are 1-based** everywhere a human or agent sees them.
 - **Coordinates are PDF points** (1/72"), origin at the **top-left** of the
-  page, y growing downward — identical to what `omapdf read` reports, so a
+  page, y growing downward — identical to what `omapreview read` reports, so a
   bbox from a read can be passed straight back as a target.
 - Every applied op is echoed back in the report with its resolved geometry
   (`rects`, `rect`, `page`) and `"applied": true|false` (false = dry run).
@@ -62,7 +62,7 @@ non-form document). `size` defaults to 11pt.
 ```json
 {"op": "fill_field", "field": "tenant_name", "value": "Jane Doe"}
 ```
-Fills an AcroForm field by name (find names with `omapdf fields`). Checkbox
+Fills an AcroForm field by name (find names with `omapreview fields`). Checkbox
 fields accept `true/yes/on/1` (case-insensitive). Unknown names fail with the
 document's actual field list in the error. Report adds `page`.
 
@@ -73,7 +73,7 @@ document's actual field list in the error. Report adds `page`.
 ```
 Stamps a saved signature PNG with its top-left corner at `at`, scaled to
 `width` points (height keeps the image's aspect ratio). `signature` names an
-image saved via `omapdf sig add` (default: `"default"`). `date: true` writes
+image saved via `omapreview sig add` (default: `"default"`). `date: true` writes
 today's ISO date below. Report adds `rect` (and `date`).
 
 Note: the image is inserted into page content, not as an annotation — it
@@ -107,7 +107,7 @@ oval need `rect`. Renders as PDF Line, Square, or Circle annotations.
 {"op": "crop_pages", "pages": [1], "rect": [72, 80, 500, 750]}
 ```
 Sets the PDF **CropBox** for each listed page — the visible page region in
-current page coordinates (top-left origin, same space as `omapdf read` rects).
+current page coordinates (top-left origin, same space as `omapreview read` rects).
 Does not auto-trim content to ink bounds; repeated crops stack in page space.
 Report: `{ "pages": [...], "rect": [...], "resolved": [{ "page", "cropbox",
 "size_before", "size_after" }, ...] }`.
@@ -172,7 +172,7 @@ covers content visually but leaves the underlying text in `get_text()` /
 ```json
 {"op": "delete_annotation", "page": 1, "index": 0}
 ```
-Removes one annotation on `page` by 0-based `index` (listed in `omapdf read`
+Removes one annotation on `page` by 0-based `index` (listed in `omapreview read`
 under `annotations`). When deleting several on the same page in one batch,
 indices are applied high-to-low so they stay valid. Report adds `type` and
 `rect` of the removed annotation.

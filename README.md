@@ -1,18 +1,18 @@
-# omapdf
+# omapreview
 
 **Preview.app for Linux — but your agent can drive it.**
 
-![omapdf — read, annotate, sign, or hand it to your agent](docs/assets/hero.png)
+![omapreview — read, annotate, sign, or hand it to your agent](docs/assets/hero.png)
 
-omapdf is an agent-native PDF tool: a fast GTK4 **editor** for reading,
+omapreview is an agent-native PDF tool: a fast GTK4 **editor** for reading,
 annotating, and signing; a scriptable **CLI**; an **MCP server** for AI
 agents; and an **Omarchy** integration that ties them all to the operating
 system. One op engine underneath — anything a human can do by hand, an agent
 can do by instruction, and vice versa.
 
 ```bash
-omapdf edit lease.pdf                       # the editor
-omapdf sign lease.pdf --page 4 --at 120,540 --date -o signed.pdf
+omapreview edit lease.pdf                       # the editor
+omapreview sign lease.pdf --page 4 --at 120,540 --date -o signed.pdf
 # …or just tell your agent: "fill out this lease, highlight anything
 #  unusual, and get it ready for my signature"
 ```
@@ -22,7 +22,7 @@ omapdf sign lease.pdf --page 4 --at 120,540 --date -o signed.pdf
 The "someone emailed me a PDF, I need to highlight two things, sign it, and
 send it back" workflow is macOS Preview's killer feature — and Linux has no
 lightweight equivalent. And nobody anywhere treats AI agents as first-class
-PDF users. omapdf does both, with one architecture:
+PDF users. omapreview does both, with one architecture:
 
 ## One operations API, every client is thin
 
@@ -51,7 +51,7 @@ the other exactly what changed and where. Everything written is a
 **standard PDF annotation** — Acrobat, Preview, and Evince users see your
 notes and highlights as normal comments.
 
-## The editor (`omapdf edit`)
+## The editor (`omapreview edit`)
 
 A native GTK4 editor, Preview-fast, designed for Omarchy but plain-GTK
 portable:
@@ -80,7 +80,7 @@ portable:
   page navigation by Up/Down, PgUp/PgDn, Home/End, Ctrl+G go-to-page
 - **Comments open on click**: click any saved annotation to read its text —
   including comments left by agents or by other people's PDF apps
-- **Agent proposals as ghosts**: `omapdf edit doc.pdf --ops proposal.json`
+- **Agent proposals as ghosts**: `omapreview edit doc.pdf --ops proposal.json`
   loads an agent's dry-run ops as selected, draggable overlays — nudge,
   then Save. Agent proposes, human confirms.
 - **Ask your agent** (✦): type a question, it opens your OS default agent
@@ -94,34 +94,34 @@ portable:
 ## The CLI
 
 ```bash
-omapdf read doc.pdf                  # structured JSON: text+bboxes, fields, annots
-omapdf read doc.pdf --text-only      # just the words
-omapdf fields form.pdf               # fillable fields with names and rects
-omapdf snapshot doc.pdf --page 2 --grid 50   # page PNG with a labeled
+omapreview read doc.pdf                  # structured JSON: text+bboxes, fields, annots
+omapreview read doc.pdf --text-only      # just the words
+omapreview fields form.pdf               # fillable fields with names and rects
+omapreview snapshot doc.pdf --page 2 --grid 50   # page PNG with a labeled
                                      # coordinate grid — agents read placement
                                      # coordinates straight off the image
 
-omapdf annotate doc.pdf --page 2 --match "termination clause"
-omapdf note doc.pdf --page 2 --at 400,300 --text "negotiate this"
-omapdf fill form.pdf --field tenant_name "Peter Bergin" --field rent "1800"
-omapdf apply doc.pdf --ops edits.json        # atomic batch of ops
+omapreview annotate doc.pdf --page 2 --match "termination clause"
+omapreview note doc.pdf --page 2 --at 400,300 --text "negotiate this"
+omapreview fill form.pdf --field tenant_name "Peter Bergin" --field rent "1800"
+omapreview apply doc.pdf --ops edits.json        # atomic batch of ops
 
-omapdf pages doc.pdf --list                  # page list (JSON)
-omapdf pages doc.pdf --delete 2,4 -o out.pdf
-omapdf pages doc.pdf --rotate 90 --pages 1 -o out.pdf
-omapdf pages doc.pdf --move 5-6 --after 1 -o out.pdf
-omapdf pages doc.pdf --insert other.pdf --after 2 -o out.pdf
-omapdf pages doc.pdf --extract 2-3 -o excerpt.pdf
+omapreview pages doc.pdf --list                  # page list (JSON)
+omapreview pages doc.pdf --delete 2,4 -o out.pdf
+omapreview pages doc.pdf --rotate 90 --pages 1 -o out.pdf
+omapreview pages doc.pdf --move 5-6 --after 1 -o out.pdf
+omapreview pages doc.pdf --insert other.pdf --after 2 -o out.pdf
+omapreview pages doc.pdf --extract 2-3 -o excerpt.pdf
 
-omapdf redact doc.pdf --page 1 --match "SSN" -o redacted.pdf
-omapdf redact doc.pdf --page 1 --rect 72,400,300,430 -o redacted.pdf
-omapdf delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
+omapreview redact doc.pdf --page 1 --match "SSN" -o redacted.pdf
+omapreview redact doc.pdf --page 1 --rect 72,400,300,430 -o redacted.pdf
+omapreview delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
 
-omapdf sig draw                      # draw your signature once (GTK window)
-omapdf sig add ~/sig.png --name work # …or import an image
-omapdf sign doc.pdf --page 4 --at 120,540 --date -o signed.pdf
-omapdf flatten doc.pdf -o final.pdf  # bake everything in for any viewer
-omapdf open doc.pdf                  # opens the omapdf editor
+omapreview sig draw                      # draw your signature once (GTK window)
+omapreview sig add ~/sig.png --name work # …or import an image
+omapreview sign doc.pdf --page 4 --at 120,540 --date -o signed.pdf
+omapreview flatten doc.pdf -o final.pdf  # bake everything in for any viewer
+omapreview open doc.pdf                  # opens the omapreview editor
 ```
 
 Every edit command takes `-o` (default: in place), `--dry-run`, and
@@ -132,7 +132,7 @@ The ops vocabulary is specified in [docs/ops.md](docs/ops.md).
 ## Agents
 
 ```bash
-claude mcp add omapdf -- omapdf-mcp
+claude mcp add omapreview -- omapreview-mcp
 ```
 
 MCP tools: `read_pdf`, `list_form_fields`, `apply_ops`, `highlight`,
@@ -151,23 +151,23 @@ the human when taste matters.
 ## Install
 
 ```bash
-git clone https://github.com/pbergin11/omapdf && cd omapdf
+git clone https://github.com/pbergin11/omapreview && cd omapreview
 python -m venv --system-site-packages .venv    # system gi for the GTK editor
 .venv/bin/pip install -e '.[mcp]'
-ln -s "$PWD/.venv/bin/omapdf" ~/.local/bin/omapdf
-ln -s "$PWD/.venv/bin/omapdf-mcp" ~/.local/bin/omapdf-mcp
-ln -s "$PWD/bin/omapdf-pick" ~/.local/bin/omapdf-pick
+ln -s "$PWD/.venv/bin/omapdf" ~/.local/bin/omapreview
+ln -s "$PWD/.venv/bin/omapreview-mcp" ~/.local/bin/omapreview-mcp
+ln -s "$PWD/bin/omapreview-pick" ~/.local/bin/omapreview-pick
 ```
 
 Requires Python ≥ 3.11, PyMuPDF, and (for the editor and `sig draw`)
 PyGObject + GTK4 from your distro. Arch packaging in
 [`packaging/PKGBUILD`](packaging/PKGBUILD).
 
-Make omapdf your system PDF handler:
+Make omapreview your system PDF handler:
 
 ```bash
-cp share/omapdf.desktop ~/.local/share/applications/
-xdg-mime default omapdf.desktop application/pdf
+cp share/omapreview.desktop ~/.local/share/applications/
+xdg-mime default omapreview.desktop application/pdf
 ```
 
 ## Omarchy integration
