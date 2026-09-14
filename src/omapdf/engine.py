@@ -119,6 +119,33 @@ def _apply_ink(doc, op) -> dict:
     return {"rect": list(annot.rect)}
 
 
+def _apply_shape(doc, op) -> dict:
+    page = _page(doc, op["page"])
+    shape = op["shape"]
+    if shape in ("line", "arrow"):
+        p1 = pymupdf.Point(op["from"])
+        p2 = pymupdf.Point(op["to"])
+        annot = page.add_line_annot(p1, p2)
+        if shape == "arrow":
+            annot.set_line_ends(
+                pymupdf.PDF_ANNOT_LE_NONE,
+                pymupdf.PDF_ANNOT_LE_CLOSED_ARROW,
+            )
+        report = {"shape": shape, "from": op["from"], "to": op["to"]}
+    else:
+        rect = pymupdf.Rect(op["rect"])
+        if shape == "rect":
+            annot = page.add_rect_annot(rect)
+        else:
+            annot = page.add_circle_annot(rect)
+        report = {"shape": shape, "rect": list(rect)}
+    annot.set_colors(stroke=op["color"])
+    annot.set_border(width=op["width"])
+    annot.update()
+    report["rect"] = list(annot.rect)
+    return report
+
+
 def _validate_page_indices(doc: pymupdf.Document, pages: list[int], label: str = "page") -> None:
     for p in pages:
         if p < 1 or p > doc.page_count:
@@ -380,6 +407,7 @@ _APPLIERS = {
     "fill_field": _apply_fill_field,
     "place_signature": _apply_place_signature,
     "ink": _apply_ink,
+    "shape": _apply_shape,
     "rotate_pages": _apply_rotate_pages,
     "delete_pages": _apply_delete_pages,
     "move_pages": _apply_move_pages,

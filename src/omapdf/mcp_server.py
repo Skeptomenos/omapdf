@@ -277,6 +277,38 @@ def redact(
 
 
 @mcp.tool()
+def add_shape(
+    path: str,
+    page: int,
+    shape: str,
+    from_point: list[float] | None = None,
+    to_point: list[float] | None = None,
+    rect: list[float] | None = None,
+    color: list[float] | None = None,
+    width: float = 2.0,
+    output: str | None = None,
+) -> dict:
+    """Add a Line, Square, or Circle PDF annotation on `page`.
+
+    `shape` is one of line, arrow, rect, oval. Line and arrow need
+    `from_point` and `to_point` ([x, y]); rect and oval need `rect`
+    ([x0, y0, x1, y1]). Coordinates are PDF points, top-left origin."""
+    op: dict = {"op": "shape", "page": page, "shape": shape, "width": width}
+    if shape in ("line", "arrow"):
+        if not from_point or not to_point:
+            raise ValueError("line and arrow need from_point and to_point")
+        op["from"] = from_point
+        op["to"] = to_point
+    elif rect:
+        op["rect"] = rect
+    else:
+        raise ValueError("rect and oval need rect")
+    if color:
+        op["color"] = color
+    return engine.apply(path, [op], output=output)
+
+
+@mcp.tool()
 def flatten_pdf(path: str, output: str | None = None) -> dict:
     """Bake all annotations and form fields into page content (irreversible
     in the output file; the input is preserved when `output` is given)."""

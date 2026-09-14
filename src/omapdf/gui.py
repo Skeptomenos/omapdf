@@ -71,6 +71,49 @@ def _norm_rect(it: dict) -> tuple[float, float, float, float]:
         max(it["y0"], it["y1"]),
     )
 
+
+def _draw_shape(
+    ctx,
+    shape: str,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    color: tuple[float, ...],
+    width: float,
+    alpha: float = 1.0,
+):
+    ctx.set_source_rgba(color[0], color[1], color[2], alpha)
+    ctx.set_line_width(width)
+    if shape in ("line", "arrow"):
+        ctx.move_to(x0, y0)
+        ctx.line_to(x1, y1)
+        ctx.stroke()
+        if shape == "arrow":
+            ang = math.atan2(y1 - y0, x1 - x0)
+            ah = max(8.0, width * 4)
+            for da in (2.4, -2.4):
+                ctx.move_to(x1, y1)
+                ctx.line_to(
+                    x1 - ah * math.cos(ang + da),
+                    y1 - ah * math.sin(ang + da),
+                )
+                ctx.stroke()
+    elif shape == "rect":
+        rx0, ry0, rx1, ry1 = min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+        ctx.rectangle(rx0, ry0, rx1 - rx0, ry1 - ry0)
+        ctx.stroke()
+    else:
+        rx0, ry0, rx1, ry1 = min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+        mx, my = (rx0 + rx1) / 2, (ry0 + ry1) / 2
+        rw, rh = max((rx1 - rx0) / 2, 1), max((ry1 - ry0) / 2, 1)
+        ctx.save()
+        ctx.translate(mx, my)
+        ctx.scale(rw, rh)
+        ctx.arc(0, 0, 1, 0, 2 * math.pi)
+        ctx.stroke()
+        ctx.restore()
+
 CSS = b"""
 headerbar button.save-btn {
   background: linear-gradient(180deg, #4a95ee, #2f74d0);
@@ -159,6 +202,7 @@ class Editor:
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
         self.pen_color = PEN_COLORS[1][1]
+        self.shape_kind = "rect"
         self.zoom_pct: float | None = None  # None = fit page in viewport
         self.page_origin = (0.0, 0.0)  # paper top-left in view pixels
         self.paper_px = (0, 0)  # paper width/height in view pixels
@@ -321,6 +365,25 @@ class Editor:
                     "color": op.get("color", [0.75, 0.1, 0.1]),
                     "width": op.get("width", PEN_WIDTH),
                 })
+            elif kind == "shape":
+                shape = op["shape"]
+                if shape in ("line", "arrow"):
+                    item = {
+                        "kind": "shape", "page": page, "shape": shape,
+                        "x0": op["from"][0], "y0": op["from"][1],
+                        "x1": op["to"][0], "y1": op["to"][1],
+                        "color": op.get("color", [0.1, 0.1, 0.1]),
+                        "width": op.get("width", PEN_WIDTH),
+                    }
+                else:
+                    r = op["rect"]
+                    item = {
+                        "kind": "shape", "page": page, "shape": shape,
+                        "x0": r[0], "y0": r[1], "x1": r[2], "y1": r[3],
+                        "color": op.get("color", [0.1, 0.1, 0.1]),
+                        "width": op.get("width", PEN_WIDTH),
+                    }
+                self.pending.append(item)
             elif kind == "redact":
                 if "rect" in op:
                     r = op["rect"]
@@ -366,6 +429,19 @@ class Editor:
             elif it["kind"] == "ink":
                 ops.append({"op": "ink", "page": page, "strokes": it["strokes"],
                             "color": it["color"], "width": it["width"]})
+            elif it["kind"] == "shape":
+                base = {
+                    "op": "shape",
+                    "page": page,
+                    "shape": it["shape"],
+                    "color": it["color"],
+                    "width": it["width"],
+                }
+                if it["shape"] in ("line", "arrow"):
+                    ops.append({**base, "from": [it["x0"], it["y0"]], "to": [it["x1"], it["y1"]]})
+                else:
+                    x0, y0, x1, y1 = _norm_rect(it)
+                    ops.append({**base, "rect": [x0, y0, x1, y1]})
             elif it["kind"] == "redact":
                 if it.get("match"):
                     ops.append({"op": "redact", "page": page,
@@ -391,6 +467,8 @@ class Editor:
         if it["kind"] == "note":
             return it["x"], it["y"], it["x"] + NOTE_SIZE, it["y"] + NOTE_SIZE
         if it["kind"] == "highlight":
+            return _norm_rect(it)
+        if it["kind"] == "shape":
             return _norm_rect(it)
         if it["kind"] == "redact":
             return _norm_rect(it)
@@ -455,7 +533,7 @@ class Editor:
         if it["kind"] in ("sig", "text", "note"):
             it["x"] += dx
             it["y"] += dy
-        elif it["kind"] in ("highlight", "redact"):
+        elif it["kind"] in ("highlight", "redact", "shape"):
             for k in ("x0", "x1"):
                 it[k] += dx
             for k in ("y0", "y1"):
@@ -618,12 +696,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 _stroke_path(ctx, [ed.live_stroke], ed.pen_color, PEN_WIDTH)
             if ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
-                if ed.tool == "redact":
+                if ed.tool == "shape":
+                    _draw_shape(
+                        ctx, ed.shape_kind, x0, y0, x1, y1,
+                        ed.pen_color, PEN_WIDTH, alpha=0.85,
+                    )
+                elif ed.tool == "redact":
                     ctx.set_source_rgba(0, 0, 0, 0.35)
+                    ctx.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+                    ctx.fill()
                 else:
                     ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
-                ctx.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
-                ctx.fill()
+                    ctx.rectangle(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+                    ctx.fill()
             for i, (pno, rect) in enumerate(ed.search_hits):
                 if pno != ed.page_no:
                     continue
@@ -685,6 +770,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ctx.set_source_rgba(1, 0.85, 0.1, 0.35)
                 ctx.rectangle(x0, y0, x1 - x0, y1 - y0)
                 ctx.fill()
+            elif it["kind"] == "shape":
+                _draw_shape(
+                    ctx, it["shape"], it["x0"], it["y0"], it["x1"], it["y1"],
+                    tuple(it["color"]), it["width"], alpha=0.92,
+                )
             elif it["kind"] == "redact":
                 x0, y0, x1, y1 = ed.item_rect(it)
                 ctx.set_source_rgba(0, 0, 0, 0.45)
@@ -981,6 +1071,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.live_stroke = [(px, py)]
             elif ed.tool == "highlight":
                 ed.rubber = (px, py, px, py)
+            elif ed.tool == "shape":
+                ed.rubber = (px, py, px, py)
             elif ed.tool == "redact":
                 ed.rubber = (px, py, px, py)
             elif ed.tool == "select":
@@ -1000,7 +1092,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if ed.tool == "pen" and ed.live_stroke is not None:
                 sx, sy = ed.live_stroke[0]
                 ed.live_stroke.append((sx + pdx, sy + pdy))
-            elif ed.tool in ("highlight", "redact") and ed.rubber:
+            elif ed.tool in ("highlight", "redact", "shape") and ed.rubber:
                 x0, y0, _, _ = ed.rubber
                 ed.rubber = (x0, y0, x0 + pdx, y0 + pdy)
             elif (
@@ -1028,6 +1120,16 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ed.checkpoint()
                     ed.pending.append({"kind": "highlight", "page": ed.page_no,
                                        "x0": x0, "y0": y0, "x1": x1, "y1": y1})
+            if ed.tool == "shape" and ed.rubber:
+                x0, y0, x1, y1 = ed.rubber
+                if max(abs(x1 - x0), abs(y1 - y0)) > 3:
+                    ed.checkpoint()
+                    ed.pending.append({
+                        "kind": "shape", "page": ed.page_no,
+                        "shape": ed.shape_kind,
+                        "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                        "color": list(ed.pen_color), "width": PEN_WIDTH,
+                    })
             if ed.tool == "redact" and ed.rubber:
                 x0, y0, x1, y1 = ed.rubber
                 if abs(x1 - x0) > 3 and abs(y1 - y0) > 3:
@@ -1219,6 +1321,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ctx.rectangle(4.5, 5.0, 9.0, 8.5)
             ctx.fill()
 
+        def paint_shapes(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            ctx.rectangle(3.0, 4.0, 11.5, 9.5)
+            ctx.stroke()
+            ctx.move_to(4.5, 13.5)
+            ctx.line_to(13.5, 4.5)
+            ctx.stroke()
+
         def make_tool(name, tip, painter):
             nonlocal first_btn
             btn = Gtk.ToggleButton()
@@ -1307,6 +1417,57 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         make_tool("sign", "Sign — click to place your signature", paint_sign)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
         make_tool("cross", "Cross-out stamp — places an ✕ on the page", paint_cross)
+        shape_btn = make_tool(
+            "shape",
+            "Shapes — drag line, arrow, rect, or oval (tap again to pick)",
+            paint_shapes,
+        )
+        shape_pop = Gtk.Popover()
+        shape_pop.set_parent(shape_btn)
+        shape_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        shape_box.set_margin_top(8)
+        shape_box.set_margin_bottom(8)
+        shape_box.set_margin_start(8)
+        shape_box.set_margin_end(8)
+        for label, kind in (
+            ("Line", "line"),
+            ("Arrow", "arrow"),
+            ("Rectangle", "rect"),
+            ("Oval", "oval"),
+        ):
+            sb = Gtk.Button(label=label)
+            sb.add_css_class("flat")
+            sb.set_halign(Gtk.Align.FILL)
+            sb.get_child().set_halign(Gtk.Align.START)
+
+            def pick_shape(_b, chosen=kind):
+                ed.shape_kind = chosen
+                shape_pop.popdown()
+                set_tool("shape")
+
+            sb.connect("clicked", pick_shape)
+            shape_box.append(sb)
+        shape_hint = Gtk.Label(
+            label="Uses the current pen color. Ghosts apply on Save.",
+            wrap=True,
+            xalign=0,
+        )
+        shape_hint.add_css_class("dim-label")
+        shape_box.append(shape_hint)
+        shape_pop.set_child(shape_box)
+        shape_state = {"just_activated": False}
+        shape_btn.connect(
+            "toggled",
+            lambda b: b.get_active() and shape_state.__setitem__("just_activated", True),
+        )
+
+        def on_shape_clicked(_b):
+            if shape_state["just_activated"]:
+                shape_state["just_activated"] = False
+            elif ed.tool == "shape":
+                shape_pop.popup()
+
+        shape_btn.connect("clicked", on_shape_clicked)
         redact_btn = make_tool(
             "redact",
             "Redact — drag over text (tap again for free-rectangle mode)",

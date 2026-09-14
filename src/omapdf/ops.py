@@ -22,6 +22,7 @@ points (1/72 inch) with the origin at the TOP-LEFT of the page, matching what
 from __future__ import annotations
 
 MARKUP_STYLES = ("highlight", "underline", "strikeout", "squiggly")
+SHAPE_TYPES = ("line", "arrow", "rect", "oval")
 
 OP_TYPES = (
     "highlight",
@@ -37,6 +38,7 @@ OP_TYPES = (
     "extract_pages",
     "redact",
     "delete_annotation",
+    "shape",
 )
 
 _ROTATE_DEGREES = (90, 180, 270, -90)
@@ -201,6 +203,25 @@ def validate(op: dict) -> dict:
         if not (isinstance(index, int) and index >= 0):
             raise OpError(f"index must be a non-negative integer, got {index!r}")
         out["index"] = index
+
+    elif kind == "shape":
+        _require(op, "page")
+        shape = _require(op, "shape")
+        if shape not in SHAPE_TYPES:
+            raise OpError(
+                f"unknown shape {shape!r}; valid shapes: {', '.join(SHAPE_TYPES)}"
+            )
+        out["shape"] = shape
+        if shape in ("line", "arrow"):
+            out["from"] = _point(_require(op, "from"))
+            out["to"] = _point(_require(op, "to"))
+        else:
+            out["rect"] = _rect(_require(op, "rect"))
+        color = op.get("color", [0, 0, 0])
+        if not (isinstance(color, (list, tuple)) and len(color) == 3):
+            raise OpError(f"color must be [r, g, b] in 0..1, got {color!r}")
+        out["color"] = [float(c) for c in color]
+        out["width"] = float(op.get("width", 2))
 
     if "page" in out:
         page = out["page"]

@@ -145,6 +145,20 @@ def cmd_redact(args):
     _run_edit(args, [op])
 
 
+def cmd_shape(args):
+    op = {"op": "shape", "page": args.page, "shape": args.shape}
+    if args.shape in ("line", "arrow"):
+        op["from"] = args.from_point
+        op["to"] = args.to_point
+    else:
+        op["rect"] = args.rect
+    if args.color:
+        op["color"] = args.color
+    if args.width:
+        op["width"] = args.width
+    _run_edit(args, [op])
+
+
 def cmd_flatten(args):
     result = engine.flatten(args.pdf, output=args.output)
     _emit(result, args.json)
@@ -352,6 +366,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _out_args(p)
     p.set_defaults(func=cmd_redact)
+
+    p = sub.add_parser("shape", help="add line, arrow, rectangle, or oval annotation")
+    p.add_argument("pdf")
+    p.add_argument("--page", type=int, required=True)
+    p.add_argument(
+        "--shape",
+        choices=["line", "arrow", "rect", "oval"],
+        required=True,
+        help="annotation shape type",
+    )
+    p.add_argument(
+        "--from",
+        dest="from_point",
+        type=_point,
+        help="start X,Y for line or arrow",
+    )
+    p.add_argument(
+        "--to",
+        dest="to_point",
+        type=_point,
+        help="end X,Y for line or arrow",
+    )
+    p.add_argument("--rect", type=_rect, help="X0,Y0,X1,Y1 for rect or oval")
+    p.add_argument("--color", type=_rgb, help="stroke RGB as R,G,B in 0..1 (default black)")
+    p.add_argument("--width", type=float, help="stroke width in points (default 2)")
+    _out_args(p)
+    p.set_defaults(func=cmd_shape)
 
     p = sub.add_parser("flatten", help="bake annotations and form fields into the page")
     p.add_argument("pdf")

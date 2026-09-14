@@ -16,7 +16,7 @@ Each op is available through `omapdf apply --ops file.json` and MCP
 | Page surgery | `omapdf pages FILE --delete …` etc. | `delete_pages`, `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages` |
 | Redact | `omapdf redact FILE --page N --match …` or `--rect …` | `redact` (dry-run default) |
 | Delete annot | `omapdf delete-annotation FILE --page N --index I` | `delete_annotation` (dry-run default) |
-| Markup / forms | `annotate`, `note`, `fill`, `sign` | `highlight`, `add_note`, `fill_field`, `place_signature` |
+| Markup / forms | `annotate`, `note`, `fill`, `sign`, `shape` | `highlight`, `add_note`, `fill_field`, `place_signature`, `add_shape` |
 
 Destructive MCP tools (`place_signature`, `delete_pages`, `redact`,
 `delete_annotation`) default to dry-run; pass `confirm=true` (or
@@ -87,6 +87,19 @@ Freehand strokes as a real Ink annotation. `strokes` is a list of polylines
 (each 2+ `[x, y]` points); `color` is `[r, g, b]` in 0..1 (default black);
 `width` in points (default 2). Powers the editor's pen and its ✓/✕ stamps.
 Report adds the bounding `rect`.
+
+### shape
+```json
+{"op": "shape", "page": 1, "shape": "line", "from": [72, 100], "to": [300, 200]}
+{"op": "shape", "page": 1, "shape": "arrow", "from": [72, 100], "to": [300, 200]}
+{"op": "shape", "page": 1, "shape": "rect", "rect": [80, 80, 220, 160]}
+{"op": "shape", "page": 1, "shape": "oval", "rect": [80, 80, 220, 160],
+ "color": [0.1, 0.35, 0.85], "width": 2}
+```
+Vector shape annotations (Preview-class markup). `shape` is one of `line`,
+`arrow`, `rect`, `oval`. Line and arrow need `from` and `to` points; rect and
+oval need `rect`. Renders as PDF Line, Square, or Circle annotations.
+`color` defaults to black; `width` defaults to 2pt. Report adds `rect` (bbox).
 
 ### rotate_pages
 ```json
