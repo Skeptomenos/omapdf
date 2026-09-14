@@ -19,7 +19,7 @@ try:  # MCP SDK v2
 except ImportError:  # SDK v1
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import engine, read, signature
+from . import engine, pages as pages_mod, read, signature
 
 mcp = _Server("omapdf")
 
@@ -110,6 +110,115 @@ def place_signature(
 def list_signatures() -> list[str]:
     """Names of the user's saved signature images."""
     return signature.list_names()
+
+
+@mcp.tool()
+def list_pages(path: str) -> dict:
+    """List every page in a PDF with number, size, and rotation."""
+    return pages_mod.list_pages(path)
+
+
+@mcp.tool()
+def delete_pages(
+    path: str,
+    pages: list[int],
+    output: str | None = None,
+    confirm: bool = False,
+) -> dict:
+    """Delete pages by 1-based number. Defaults to dry-run — pass confirm=true
+    after the user approves."""
+    result = engine.apply(
+        path,
+        [{"op": "delete_pages", "pages": pages}],
+        output=output,
+        dry_run=not confirm,
+    )
+    if not confirm:
+        result["needs_confirmation"] = (
+            "Dry run only. Re-call with confirm=true after the user approves."
+        )
+    return result
+
+
+@mcp.tool()
+def rotate_pages(
+    path: str,
+    pages: list[int],
+    degrees: int,
+    output: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Rotate pages by 90, 180, 270, or -90 degrees."""
+    return engine.apply(
+        path,
+        [{"op": "rotate_pages", "pages": pages, "degrees": degrees}],
+        output=output,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
+def move_pages(
+    path: str,
+    pages: list[int],
+    after: int,
+    output: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Reorder pages: move `pages` to after page `after` (0 = beginning)."""
+    return engine.apply(
+        path,
+        [{"op": "move_pages", "pages": pages, "after": after}],
+        output=output,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
+def insert_pages(
+    path: str,
+    after: int,
+    output: str | None = None,
+    source: str | None = None,
+    source_pages: list[int] | None = None,
+    blank_count: int | None = None,
+    blank_width: float = 595,
+    blank_height: float = 842,
+    image: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Insert pages after `after` from a source PDF, blank sheet(s), or image."""
+    op: dict = {"op": "insert_pages", "after": after}
+    if source:
+        op["source"] = source
+        if source_pages:
+            op["source_pages"] = source_pages
+    elif image:
+        op["image"] = image
+    elif blank_count is not None:
+        op["blank"] = {
+            "count": blank_count,
+            "width": blank_width,
+            "height": blank_height,
+        }
+    else:
+        raise ValueError("insert_pages needs source, image, or blank_count")
+    return engine.apply(path, [op], output=output, dry_run=dry_run)
+
+
+@mcp.tool()
+def extract_pages(
+    path: str,
+    pages: list[int],
+    to: str,
+    dry_run: bool = False,
+) -> dict:
+    """Write selected pages to a new PDF at `to`. The source file is unchanged."""
+    return engine.apply(
+        path,
+        [{"op": "extract_pages", "pages": pages, "to": to}],
+        dry_run=dry_run,
+    )
 
 
 @mcp.tool()

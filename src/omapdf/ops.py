@@ -23,7 +23,21 @@ from __future__ import annotations
 
 MARKUP_STYLES = ("highlight", "underline", "strikeout", "squiggly")
 
-OP_TYPES = ("highlight", "note", "text_box", "fill_field", "place_signature", "ink")
+OP_TYPES = (
+    "highlight",
+    "note",
+    "text_box",
+    "fill_field",
+    "place_signature",
+    "ink",
+    "rotate_pages",
+    "delete_pages",
+    "move_pages",
+    "insert_pages",
+    "extract_pages",
+)
+
+_ROTATE_DEGREES = (90, 180, 270, -90)
 
 
 class OpError(ValueError):
@@ -46,6 +60,17 @@ def _point(value) -> list[float]:
     if not (isinstance(value, (list, tuple)) and len(value) == 2):
         raise OpError(f"point must be [x, y], got {value!r}")
     return [float(v) for v in value]
+
+
+def _page_list(value, key: str = "pages") -> list[int]:
+    if not (isinstance(value, list) and value):
+        raise OpError(f"{key} must be a non-empty list of 1-based page numbers")
+    out = []
+    for p in value:
+        if not (isinstance(p, int) and p >= 1):
+            raise OpError(f"{key} entries must be 1-based integers, got {p!r}")
+        out.append(p)
+    return out
 
 
 def validate(op: dict) -> dict:
@@ -103,6 +128,57 @@ def validate(op: dict) -> dict:
         out["width"] = float(op.get("width", 180))
         out["signature"] = op.get("signature", "default")
         out["date"] = bool(op.get("date", False))
+
+    elif kind == "rotate_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+        degrees = _require(op, "degrees")
+        if degrees not in _ROTATE_DEGREES:
+            raise OpError(f"degrees must be one of {_ROTATE_DEGREES}, got {degrees!r}")
+        out["degrees"] = degrees
+
+    elif kind == "delete_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+
+    elif kind == "move_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+        after = _require(op, "after")
+        if not (isinstance(after, int) and after >= 0):
+            raise OpError(f"after must be a non-negative integer (0 = beginning), got {after!r}")
+        out["after"] = after
+
+    elif kind == "insert_pages":
+        after = _require(op, "after")
+        if not (isinstance(after, int) and after >= 0):
+            raise OpError(f"after must be a non-negative integer (0 = beginning), got {after!r}")
+        out["after"] = after
+        has_source = "source" in op
+        has_blank = "blank" in op
+        has_image = "image" in op
+        variants = sum((has_source, has_blank, has_image))
+        if variants != 1:
+            raise OpError("insert_pages needs exactly one of 'source', 'blank', or 'image'")
+        if has_source:
+            out["source"] = str(_require(op, "source"))
+            if "source_pages" in op:
+                out["source_pages"] = _page_list(op["source_pages"], "source_pages")
+        if has_blank:
+            blank = _require(op, "blank")
+            if not isinstance(blank, dict):
+                raise OpError("blank must be an object with count, width, height")
+            count = blank.get("count", 1)
+            if not (isinstance(count, int) and count >= 1):
+                raise OpError(f"blank.count must be a positive integer, got {count!r}")
+            out["blank"] = {
+                "count": count,
+                "width": float(blank.get("width", 595)),
+                "height": float(blank.get("height", 842)),
+            }
+        if has_image:
+            out["image"] = str(_require(op, "image"))
+
+    elif kind == "extract_pages":
+        out["pages"] = _page_list(_require(op, "pages"))
+        out["to"] = str(_require(op, "to"))
 
     if "page" in out:
         page = out["page"]

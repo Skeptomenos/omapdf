@@ -308,22 +308,26 @@ Put under `tests/`. Use generated fixtures (already the project style).
 
 ## 7. Implementation plan
 
-Work in four vertical slices. Each slice ships CLI + engine + tests before GUI polish.
+Work in vertical slices. **Every milestone (M1 page knife, M2 safe share, M3 daily driver) must be validated on three surfaces: CLI, MCP, and the GTK editor.** Slice 1 therefore ships engine + CLI + MCP together; GUI page-surgery remains Slices 2–3, and M1 UI proof happens after those slices land.
+
+**Engel-500** (real bank-statement redaction exam) is an end-of-development check after M2, not a Slice 1 goal.
 
 ### Slice 0 — prep (0.5 day)
 
 - Branch `preview-parity` off upstream.
-- Extend `ops.py` schema with the new op names as rejected-unknown until appliers exist (keeps atomic fail behavior).
-- Add fixture factory: `tests/data/make_docs.py` builds a 6-page labeled PDF (“PAGE 1” …) plus one image-only page.
+- Extend `ops.py` schema with the new op names (validated; appliers follow in Slice 1).
+- Add fixture factory: `tests/data/make_docs.py` builds a 6-page labeled PDF (“PAGE 1” …) plus helpers for image assets / image-only pages. Generated fixtures, not committed binaries.
 
-### Slice 1 — page engine + CLI (2–3 days)
+### Slice 1 — page engine + CLI + MCP (2–3 days)
 
-- Implement `rotate_pages`, `delete_pages`, `move_pages`, `insert_pages` (PDF source + blank), `extract_pages`.
-- `omapdf pages ...` command.
-- Tests 1–8.
+- Implement `rotate_pages`, `delete_pages`, `move_pages`, `insert_pages` (PDF source + blank + image), `extract_pages`.
+- `omapdf pages ...` command with `--dry-run --json`.
+- MCP: `list_pages`, `delete_pages` (dry-run default), `rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`.
+- Tests 1–8 plus MCP dry-run/apply coverage.
+- Regression: `omapdf edit` still launches (no sidebar page ops yet).
 - Manual: `omapdf pages a.pdf --insert b.pdf --after 1 -o out.pdf`.
 
-Exit: CLI page surgery works on aarch64 with system `python-pymupdf`.
+Exit: CLI and MCP page surgery work on aarch64 with system `python-pymupdf`.
 
 ### Slice 2 — sidebar GUI (3–4 days)
 
@@ -377,7 +381,7 @@ Exit: Censor-class removal inside omapdf.
 
 ### M1 — Page knife (Slices 0–3)
 
-Ship even if redact is still “later.” This is the Preview feeling.
+Ship even if redact is still “later.” This is the Preview feeling. **M1 is complete only when CLI, MCP, and GTK editor all pass the same page-op acceptance set** (GTK proof lands after Slices 2–3).
 
 ### M2 — Safe share (Slice 4)
 

@@ -17,7 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import __version__, engine, read, signature
+from . import __version__, engine, pages as pages_mod, read, signature
 from .ops import OpError
 
 
@@ -166,6 +166,76 @@ def cmd_edit(args):
     raise SystemExit(gui.run(args.pdf, args.ops))
 
 
+def cmd_pages(args):
+    if args.list:
+        _emit(pages_mod.list_pages(args.pdf), args.json or True)
+        return
+
+    op_list: list[dict] = []
+    if args.delete:
+        op_list.append(
+            {"op": "delete_pages", "pages": pages_mod.parse_page_ranges(args.delete)}
+        )
+    if args.rotate is not None:
+        if not args.pages:
+            raise OpError("--rotate requires --pages")
+        op_list.append(
+            {
+                "op": "rotate_pages",
+                "pages": pages_mod.parse_page_ranges(args.pages),
+                "degrees": args.rotate,
+            }
+        )
+    if args.move:
+        if args.after is None:
+            raise OpError("--move requires --after")
+        op_list.append(
+            {
+                "op": "move_pages",
+                "pages": pages_mod.parse_page_ranges(args.move),
+                "after": args.after,
+            }
+        )
+    if args.insert or args.blank or args.image:
+        if args.after is None:
+            raise OpError("--insert/--blank/--image requires --after")
+        op: dict = {"op": "insert_pages", "after": args.after}
+        if args.blank:
+            op["blank"] = {
+                "count": args.blank_count,
+                "width": args.blank_width,
+                "height": args.blank_height,
+            }
+        elif args.image:
+            op["image"] = args.image
+        else:
+            op["source"] = args.insert
+            if args.src_pages:
+                op["source_pages"] = pages_mod.parse_page_ranges(args.src_pages)
+        op_list.append(op)
+    if args.extract:
+        if not args.output:
+            raise OpError("--extract requires -o/--output for the excerpt path")
+        op_list.append(
+            {
+                "op": "extract_pages",
+                "pages": pages_mod.parse_page_ranges(args.extract),
+                "to": args.output,
+            }
+        )
+
+    if not op_list:
+        raise OpError(
+            "specify an action: --list, --delete, --rotate, --move, --insert, "
+            "--blank, --image, or --extract"
+        )
+
+    extract_only = len(op_list) == 1 and op_list[0]["op"] == "extract_pages"
+    output = None if extract_only else args.output
+    result = engine.apply(args.pdf, op_list, output=output, dry_run=args.dry_run)
+    _emit(result, args.json)
+
+
 def cmd_snapshot(args):
     from . import render
 
@@ -260,6 +330,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("pdf")
     p.add_argument("--ops", help="ops JSON to load as draggable proposals")
     p.set_defaults(func=cmd_edit)
+
+    p = sub.add_parser("pages", help="list, delete, rotate, move, insert, or extract pages")
+    p.add_argument("pdf")
+    p.add_argument("--list", action="store_true", help="list pages (JSON)")
+    p.add_argument("--delete", metavar="PAGES", help="delete pages, e.g. 1,4-6")
+    p.add_argument("--rotate", type=int, choices=[90, 180, 270, -90], help="rotate degrees")
+    p.add_argument("--pages", metavar="PAGES", help="pages for --rotate, e.g. 2,3")
+    p.add_argument("--move", metavar="PAGES", help="pages to move, e.g. 5-6")
+    p.add_argument("--after", type=int, help="insert/move position (0 = beginning)")
+    p.add_argument("--insert", metavar="PDF", help="insert pages from another PDF")
+    p.add_argument("--src-pages", metavar="PAGES", help="source pages for --insert")
+    p.add_argument("--blank", action="store_true", help="insert blank page(s)")
+    p.add_argument("--blank-count", type=int, default=1, help="blank pages to insert")
+    p.add_argument("--blank-width", type=float, default=595)
+    p.add_argument("--blank-height", type=float, default=842)
+    p.add_argument("--image", metavar="PATH", help="insert an image as a new page")
+    p.add_argument("--extract", metavar="PAGES", help="extract pages to -o path")
+    _out_args(p)
+    p.set_defaults(func=cmd_pages)
 
     p = sub.add_parser("snapshot", help="render a page to PNG (with optional coordinate grid)")
     p.add_argument("pdf")
