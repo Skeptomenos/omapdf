@@ -364,11 +364,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         area = Gtk.DrawingArea()
         sidebar_api = {
             "refresh": lambda: None,
+            "highlight_current": lambda _n: None,
             "select_row": lambda _n: None,
             "sidebar_focus": {"active": False},
+            "selected_1based": lambda: [],
+            "has_page_selection": lambda: False,
             "delete_selected_pages": lambda: None,
             "rotate_selected": lambda _d: None,
             "insert_blank_after_current": lambda: None,
+            "copy_selected_pages": lambda: False,
+            "paste_pages": lambda: False,
+            "cut_selected_pages": lambda: False,
         }
 
         def refresh_title():
@@ -401,7 +407,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             area.set_content_height(pix.height)
             page_label.set_text(f"{ed.page_no + 1} / {ed.page_count()}")
             update_nav()
-            sidebar_api["select_row"](ed.page_no)
+            sidebar_api["highlight_current"](ed.page_no)
             area.queue_draw()
             refresh_title()
 
@@ -1401,6 +1407,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 render_page()
             elif keyval == Gdk.KEY_F9:
                 side_toggle.set_active(not side_toggle.get_active())
+            elif side_toggle.get_active():
+                if ctrl and keyval == Gdk.KEY_v:
+                    sidebar_api["paste_pages"]()
+                    return True
+                if sidebar_api["has_page_selection"]():
+                    if ctrl and keyval == Gdk.KEY_c:
+                        sidebar_api["copy_selected_pages"]()
+                        return True
+                    if ctrl and keyval == Gdk.KEY_x:
+                        sidebar_api["cut_selected_pages"]()
+                        return True
             elif sidebar_api["sidebar_focus"]["active"] or side_toggle.get_active():
                 if keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace):
                     sidebar_api["delete_selected_pages"]()

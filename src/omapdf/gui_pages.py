@@ -8,6 +8,15 @@ from pathlib import Path
 import pymupdf
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
+from .page_clipboard import (
+    MIME_PDF,
+    extract_pages_bytes,
+    push_clipboard,
+    read_clipboard_pdf_bytes,
+    serialize_pages,
+    write_pages_to_file,
+    write_temp_pdf,
+)
 from .page_preview import PagePreviewState
 
 
@@ -94,13 +103,20 @@ def build_page_sidebar(
                 row.add_controller(gesture)
 
                 drag = Gtk.DragSource()
-                drag.set_actions(Gdk.DragAction.MOVE)
+                drag.set_actions(Gdk.DragAction.MOVE | Gdk.DragAction.COPY)
 
-                def prepare(_src, _x, _y, idx=n):
+                def prepare(g, _x, _y, idx=n):
                     if idx not in selected:
                         selected.clear()
                         selected.add(idx)
                         refresh_selection_style()
+                    state = g.get_current_event_state()
+                    if state & Gdk.ModifierType.SHIFT_MASK:
+                        pages = selected_1based() or [idx + 1]
+                        pdf = extract_pages_bytes(pages_doc(), pages)
+                        return Gdk.ContentProvider.new_for_bytes(
+                            MIME_PDF, GLib.Bytes.new(pdf)
+                        )
                     return Gdk.ContentProvider.new_for_value(str(idx))
 
                 drag.connect("prepare", prepare)
@@ -119,6 +135,14 @@ def build_page_sidebar(
     def select_pages(indices: set[int]):
         selected.clear()
         selected.update(indices)
+        refresh_selection_style()
+
+    def highlight_current(n: int):
+        """Keep multi-select; ensure the current page stays selected."""
+        nonlocal anchor
+        anchor = n
+        if not selected:
+            selected.add(n)
         refresh_selection_style()
 
     def selected_1based() -> list[int]:
@@ -184,6 +208,7 @@ def build_page_sidebar(
     menu.append("Delete", "page.delete")
     menu.append("Insert blank after", "page.blank")
     menu.append("Insert file…", "page.insert_file")
+    menu.append("Extract…", "page.extract")
     popover = Gtk.PopoverMenu.new_from_model(menu)
 
     def show_menu(x, y):
@@ -268,6 +293,32 @@ def build_page_sidebar(
             return
         dialog.open(parent, None, on_pick)
 
+    def act_extract(_a, _p):
+        pages = selected_1based() or [ed.page_no + 1]
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Extract selected pages")
+        dialog.set_initial_name("excerpt.pdf")
+
+        def on_save(_d, result):
+            try:
+                dest = dialog.save_finish(result)
+            except GLib.Error:
+                return
+            path = dest.get_path()
+            if not path:
+                return
+            try:
+                write_pages_to_file(pages_doc(), pages, path)
+                toast(f"Extracted {len(pages)} page(s) to {Path(path).name}")
+            except Exception as exc:
+                toast(f"Extract failed: {exc}")
+
+        parent = ed.window
+        if parent is None:
+            toast("Editor window not ready")
+            return
+        dialog.save(parent, None, on_save)
+
     action_group = Gio.SimpleActionGroup()
     for name, cb in (
         ("rotate_cw", act_rotate_cw),
@@ -275,6 +326,7 @@ def build_page_sidebar(
         ("delete", act_delete),
         ("blank", act_blank),
         ("insert_file", act_insert_file),
+        ("extract", act_extract),
     ):
         action = Gio.SimpleAction.new(name, None)
         action.connect("activate", cb)
@@ -326,14 +378,64 @@ def build_page_sidebar(
         touch_preview()
         on_change()
 
+    def insert_after_focus() -> int:
+        pages = selected_1based()
+        if pages:
+            return pages[-1]
+        return ed.page_no + 1 if ed.page_no + 1 <= pages_doc().page_count else pages_doc().page_count
+
+    def has_page_selection() -> bool:
+        return bool(selected)
+
+    def copy_selected_pages() -> bool:
+        pages = selected_1based() or [ed.page_no + 1]
+        try:
+            json_bytes, pdf_bytes = serialize_pages(pages_doc(), pages)
+            push_clipboard(json_bytes, pdf_bytes)
+        except Exception as exc:
+            toast(f"Copy failed: {exc}")
+            return False
+        toast(f"Copied {len(pages)} page(s)")
+        return True
+
+    def paste_pages() -> bool:
+        pdf_bytes = read_clipboard_pdf_bytes()
+        if not pdf_bytes:
+            toast("Clipboard has no omapdf pages")
+            return False
+        after = insert_after_focus()
+        tmp = write_temp_pdf(pdf_bytes)
+        try:
+            ed.checkpoint()
+            preview.add_insert_pdf(after, str(tmp), retain_source=True)
+            touch_preview()
+            on_change()
+            toast(f"Pasted pages after {after}")
+            return True
+        except Exception as exc:
+            tmp.unlink(missing_ok=True)
+            toast(f"Paste failed: {exc}")
+            return False
+
+    def cut_selected_pages() -> bool:
+        if not copy_selected_pages():
+            return False
+        delete_selected_pages()
+        return True
+
     return {
         "widget": side_list,
         "refresh": refresh_thumbs,
-        "select_row": lambda n: select_pages({n}),
+        "highlight_current": highlight_current,
+        "select_row": highlight_current,
         "sidebar_focus": sidebar_focus,
         "selected_1based": selected_1based,
         "insert_blank_after_current": insert_blank_after_current,
         "delete_selected_pages": delete_selected_pages,
         "rotate_selected": rotate_selected,
+        "has_page_selection": has_page_selection,
+        "copy_selected_pages": copy_selected_pages,
+        "paste_pages": paste_pages,
+        "cut_selected_pages": cut_selected_pages,
         "actions": action_group,
     }
