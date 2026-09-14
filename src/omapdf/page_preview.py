@@ -20,6 +20,7 @@ class PagePreviewState:
         self.page_ops: list[dict] = []
         self.scratch_path: str | None = None
         self.inserted_pages: set[int] = set()  # 1-based pages in scratch view
+        self._temp_sources: list[Path] = []
 
     def has_changes(self) -> bool:
         return bool(self.page_ops)
@@ -28,11 +29,22 @@ class PagePreviewState:
         self.page_ops.clear()
         self._drop_scratch()
         self.inserted_pages.clear()
+        self._drop_temp_sources()
 
     def _drop_scratch(self):
         if self.scratch_path and os.path.exists(self.scratch_path):
             os.unlink(self.scratch_path)
         self.scratch_path = None
+
+    def _drop_temp_sources(self):
+        for path in self._temp_sources:
+            path.unlink(missing_ok=True)
+        self._temp_sources.clear()
+
+    def _remember_source(self, path: str | Path) -> str:
+        p = Path(path)
+        self._temp_sources.append(p)
+        return str(p)
 
     def rebuild(self) -> pymupdf.Document:
         """Apply page_ops to a temp copy; return the scratch document."""
@@ -91,8 +103,11 @@ class PagePreviewState:
         after: int,
         source: str,
         source_pages: list[int] | None = None,
+        *,
+        retain_source: bool = False,
     ):
-        op: dict = {"op": "insert_pages", "after": after, "source": source}
+        src = self._remember_source(source) if retain_source else source
+        op: dict = {"op": "insert_pages", "after": after, "source": src}
         if source_pages:
             op["source_pages"] = source_pages
         self.append_op(op)
