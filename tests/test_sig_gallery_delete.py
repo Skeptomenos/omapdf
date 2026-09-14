@@ -48,12 +48,11 @@ def test_sign_click_always_presents_gallery():
     end = text.index('sign_btn.connect("clicked", on_sign_clicked)')
     body = text[start:end]
     assert "rebuild_sign_popover()" in body
-    assert "_sign_pop_popup()" in body
+    assert "popover_try_popup(sign_pop)" in body
     assert "GLib.idle_add" in body
     assert 'elif ed.tool == "sign"' not in body
-    popup = text[text.index("def _sign_pop_popup") : text.index("def _flush_deferred_render")]
-    assert "popover_can_popup" in popup
-    assert "popover_is_alive" not in popup
+    assert "def _sign_pop_popup" not in text
+    assert "popover_can_popup" not in text[start:end]
 
 
 def test_live_gtk_popover_capsule_is_not_treated_as_null():
@@ -82,4 +81,11 @@ def test_live_gtk_popover_capsule_is_not_treated_as_null():
     assert gi_pointer_ok(pop) is True
     assert popover_can_popup(pop) is True
     assert popover_is_alive(pop) is False  # unrealized: autohide still skipped
+    native = pop.get_native()
+    # GTK 4.22: Popover is Native, so get_native() is self even without a surface.
+    assert native is not None
+    assert pop.get_surface() is None
+    from omepreview.popover_safe import popover_try_set_autohide
+
+    assert popover_try_set_autohide(pop, True) is True
 

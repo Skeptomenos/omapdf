@@ -18,6 +18,7 @@ from .page_clipboard import (
     write_temp_pdf,
 )
 from .page_preview import PagePreviewState
+from .popover_safe import popover_try_popup
 
 
 def build_page_sidebar(
@@ -216,13 +217,32 @@ def build_page_sidebar(
     menu.append("Insert file…", "page.insert_file")
     menu.append("Extract…", "page.extract")
     popover = Gtk.PopoverMenu.new_from_model(menu)
+    menu_host = {"widget": None}
+
+    def _release_page_menu(*_a):
+        if menu_host["widget"] is None:
+            return
+        try:
+            popover.unparent()
+        except Exception:
+            pass
+        menu_host["widget"] = None
+
+    try:
+        popover.connect("closed", _release_page_menu)
+    except Exception:
+        pass
 
     def show_menu(x, y):
-        popover.set_parent(ed.window or side_list)
+        host = ed.window or side_list
+        if menu_host["widget"] is not host:
+            _release_page_menu()
+            popover.set_parent(host)
+            menu_host["widget"] = host
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
-        popover.popup()
+        popover_try_popup(popover)
 
     def act_rotate_cw(_a, _p):
         pages = selected_1based() or [ed.page_no + 1]
