@@ -45,14 +45,20 @@ lift a finger the compositor leaves the cursor where it was, so the next
 contact would keep drawing from the last ink point. That is not Preview.
 
 While recording is armed, omepreview opens the touchpad’s evdev node
-(`/dev/input/event*`) **without grabbing it** (Hyprland/libinput keep getting
-events) and reads:
+(`/dev/input/event*`) and **EVIOCGRAB**s it so Hyprland/libinput do not also
+move the system cursor. The keyboard is never grabbed — Space and Enter
+still reach the recorder window. It then reads:
 
 1. `ABS_MT_POSITION_X` / `ABS_MT_POSITION_Y` (multitouch protocol B, preferred)
 2. else `ABS_X` / `ABS_Y` plus `BTN_TOUCH` / `BTN_TOOL_FINGER`
 
 The device abs range is scaled onto the on-screen pad widget (independent X/Y,
 top-left origin). `BTN_TOUCH` / `ABS_MT_TRACKING_ID == -1` ends the stroke.
+The on-screen pad hides the cursor (`none`) while armed.
+
+Ungrab (and restore the cursor) on **Enter** save, **Space** clear/re-arm
+(then grab again), window close, Escape, and any error path. Do not use
+`XGrabPointer` on Wayland — that ioctl does not exist there.
 
 Relative GTK motion is used **only** when no abs axes can be opened (no
 touchpad node, or permission denied). `--click` never uses evdev.
@@ -73,14 +79,16 @@ Absolute mapping needs to `open()` the touchpad node.
   and device ACLs apply. The recorder shows a relative-pointer fallback hint
   until that works.
 
-Do not `evdev` grab (`EVIOCGRAB`) the pad — that would steal it from the
-compositor.
+`EVIOCGRAB` uses the same open fd. If grab fails (EBUSY), mapping still
+works but the system cursor will keep moving — the compositor is still
+seeing the pad.
 
 ## Implementation
 
-- `omepreview.abs_pad` — evdev discovery, MT parser, abs→pad mapping (tested)
+- `omepreview.abs_pad` — evdev discovery, MT parser, abs→pad mapping,
+  EVIOCGRAB lifecycle (tested)
 - `omepreview.trackpad_sig` — capture policy, Space/Enter session, SVG
   export, abs contact up/down (tested)
-- `omepreview.draw` — GTK4 trackpad-shaped window, live ink, abs reader
-  while armed; `EventControllerLegacy` ignores `event=None`
+- `omepreview.draw` — GTK4 trackpad-shaped window, live ink, exclusive
+  touchpad grab while armed; `EventControllerLegacy` ignores `event=None`
 - `omepreview.signature` — SVG store under `~/.config/omepreview/signatures/`
