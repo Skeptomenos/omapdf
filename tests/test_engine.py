@@ -39,6 +39,7 @@ def sample_pdf(tmp_path):
 @pytest.fixture()
 def sig_home(tmp_path, monkeypatch):
     """Isolate the signature store and save a tiny 'signature'."""
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     svg = tmp_path / "sig.svg"
     svg.write_text(

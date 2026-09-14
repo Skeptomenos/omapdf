@@ -4,6 +4,7 @@ from omepreview.trackpad_sig import (
     FALLBACK_RADIUS,
     HAIRLINE_RADIUS,
     MAX_RADIUS,
+    PRESSURE_FULL_AT,
     InkPoint,
     PadMapper,
     RecorderSession,
@@ -180,10 +181,12 @@ def test_click_mode_ignores_abs_contacts():
 def test_higher_pressure_wider_segment():
     lo = pressure_to_radius(0, (0, 255))
     hi = pressure_to_radius(255, (0, 255))
+    # Mid-axis saturates: a small slice of the ABS range is already full width.
     mid = pressure_to_radius(128, (0, 255))
     assert lo == HAIRLINE_RADIUS
     assert hi == MAX_RADIUS
-    assert lo < mid < hi
+    assert mid == MAX_RADIUS
+    assert lo < hi
     thin = [
         InkPoint(0, 0, lo),
         InkPoint(30, 0, lo),
@@ -200,6 +203,17 @@ def test_higher_pressure_wider_segment():
         return max(ys) - min(ys)
 
     assert _width(fat) > _width(thin) + 2
+
+
+def test_mid_low_normalized_pressure_near_thick():
+    pmin, pmax = 0.0, 255.0
+    span = pmax - pmin
+    mid_low = pmin + 0.12 * span
+    r = pressure_to_radius(mid_low, (pmin, pmax))
+    assert r >= 0.80 * MAX_RADIUS
+    assert pressure_to_radius(pmin, (pmin, pmax)) == HAIRLINE_RADIUS
+    past_full = pmin + (PRESSURE_FULL_AT + 0.02) * span
+    assert pressure_to_radius(past_full, (pmin, pmax)) == MAX_RADIUS
 
 
 def test_zero_min_pressure_is_hairline():

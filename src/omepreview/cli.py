@@ -192,7 +192,14 @@ def cmd_sig(args):
             raise SystemExit(1)
     elif args.sig_cmd == "list":
         names = signature.list_names()
-        print("\n".join(names) if names else "(no signatures saved — omepreview sig draw)")
+        print(
+            "\n".join(names)
+            if names
+            else (
+                "(no signatures saved — omepreview sig draw writes "
+                "~/Downloads/omapreview/signature/)"
+            )
+        )
     elif args.sig_cmd == "remove":
         signature.remove(args.name)
         print(f"removed signature {args.name!r}")
@@ -426,12 +433,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sig", help="manage saved signatures")
     sig_sub = p.add_subparsers(dest="sig_cmd", required=True)
-    sp = sig_sub.add_parser("add", help="save a signature SVG (or PNG to import)")
+    sp = sig_sub.add_parser(
+        "add",
+        help="save a signature SVG (or PNG to import) to ~/Downloads/omapreview/signature/",
+    )
     sp.add_argument("image")
     sp.add_argument("--name", default="default")
     sp = sig_sub.add_parser(
         "draw",
-        help="record a signature (Space to start, finger-on-pad abs mapping, Enter saves SVG; --click for mouse)",
+        help=(
+            "record a signature (Space to start, finger-on-pad abs mapping, "
+            "Enter saves SVG to ~/Downloads/omapreview/signature/; --click for mouse)"
+        ),
     )
     sp.add_argument("--name", default="default")
     sp.add_argument(

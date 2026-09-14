@@ -57,7 +57,7 @@ def run(out_path: str | Path, *, trackpad: bool = True) -> bool:
 
 
 def run_and_save(name: str = "default", *, trackpad: bool = True) -> bool:
-    """Draw a signature and store it under `name` in the signature store."""
+    """Draw a signature and store it under `name` in ~/Downloads/omapreview/signature/."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "signature.svg"
         if not run(out, trackpad=trackpad):

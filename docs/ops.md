@@ -74,8 +74,9 @@ document's actual field list in the error. Report adds `page`.
 Stamps a saved signature **SVG** (or an imported PNG) with its top-left
 corner at `at`, scaled to `width` points (height keeps the image's aspect
 ratio). `signature` names a file saved via `omepreview sig draw` / `sig add`
-(default: `"default"`). `date: true` writes today's ISO date below. Report
-adds `rect` (and `date`).
+(default: `"default"`) under `~/Downloads/omapreview/signature/` (legacy
+read fallback: `~/.config/omepreview/signatures/`). `date: true` writes
+today's ISO date below. Report adds `rect` (and `date`).
 
 Note: the image is inserted into page content, not as an annotation — it
 survives every viewer and doesn't need flattening.
