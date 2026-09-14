@@ -22,7 +22,9 @@ compiled UI code. This directory holds its design notes.
 
 - **Ghost model**: pending items (`sig`, `text`, `note`, `highlight`,
   `ink`) live in `Editor.pending`, draw over the rendered page, and
-  convert via `Editor.to_ops()` on Save. Selection = identity in that list.
+  convert via `Editor.to_ops()` on Save. Signatures are SVG; the Sign
+  tool lists saved ones for drag-and-drop onto the page. Selection =
+  identity in that list.
 - **Undo across saves**: the undo stack holds two entry kinds — pending
   snapshots and *save boundaries* (pre/post file bytes + the pending list
   that was saved). Undoing a save writes the old bytes back and restores

@@ -192,7 +192,7 @@ def cmd_sig(args):
             raise SystemExit(1)
     elif args.sig_cmd == "list":
         names = signature.list_names()
-        print("\n".join(names) if names else "(no signatures saved — omepreview sig add <image.png>)")
+        print("\n".join(names) if names else "(no signatures saved — omepreview sig draw)")
     elif args.sig_cmd == "remove":
         signature.remove(args.name)
         print(f"removed signature {args.name!r}")
@@ -426,18 +426,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sig", help="manage saved signatures")
     sig_sub = p.add_subparsers(dest="sig_cmd", required=True)
-    sp = sig_sub.add_parser("add", help="save a signature image")
+    sp = sig_sub.add_parser("add", help="save a signature SVG (or PNG to import)")
     sp.add_argument("image")
     sp.add_argument("--name", default="default")
     sp = sig_sub.add_parser(
         "draw",
-        help="record a signature (trackpad light-touch by default; --click for mouse)",
+        help="record a signature (Space to start, finger glide, Enter saves SVG; --click for mouse)",
     )
     sp.add_argument("--name", default="default")
     sp.add_argument(
         "--click",
         action="store_true",
-        help="require mouse click-and-drag instead of trackpad light-touch",
+        help="require mouse click-and-drag instead of trackpad finger-glide",
     )
     sig_sub.add_parser("list", help="list saved signatures")
     sp = sig_sub.add_parser("remove", help="delete a saved signature")

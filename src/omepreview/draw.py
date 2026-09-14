@@ -1,32 +1,38 @@
 #!/usr/bin/env python3
 """Signature drawing window (GTK4).
 
-Preview-style trackpad capture: ink follows finger position with light touch
-or tablet proximity when the device exposes it. Mouse click-drag remains as
-fallback. Save renders strokes to a transparent, tightly-cropped PNG.
+The window *is* the trackpad: a rounded pad surface. Space arms recording
+and grabs the pointer so finger motion maps onto that pad (a click is not
+required). Enter writes SVG. Space while recording/recorded clears and
+starts over. `--click` is mouse click-and-drag fallback only.
 
 Runs under system python when the venv lacks PyGObject; callers use draw.run().
 """
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from . import signature as sig_store
-from .trackpad_sig import LIGHT_PRESSURE, should_capture, stroke_mode_label
+from .trackpad_sig import RecorderSession, STROKE_WIDTH, stroke_mode_label
 
-STROKE_WIDTH = 3.5
-CANVAS_W, CANVAS_H = 760, 300
-PAD = 8  # transparent margin around the cropped signature
+# On-screen pad, including the aluminum bezel. Glass is inset.
+PAD_W, PAD_H = 560, 380
+BEZEL = 22.0
+CORNER = 28.0
+GLASS_CORNER = 16.0
 
 
 def run(out_path: str | Path, *, trackpad: bool = True) -> bool:
     """Open the drawing window; True if a signature was saved to out_path."""
     try:
         import gi  # noqa: F401  (venv python usually lacks it)
+
         return _gtk_main(str(out_path), trackpad=trackpad) == 0
     except ImportError:
         proc = subprocess.run(
@@ -38,7 +44,7 @@ def run(out_path: str | Path, *, trackpad: bool = True) -> bool:
 def run_and_save(name: str = "default", *, trackpad: bool = True) -> bool:
     """Draw a signature and store it under `name` in the signature store."""
     with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "signature.png"
+        out = Path(tmp) / "signature.svg"
         if not run(out, trackpad=trackpad):
             return False
         sig_store.add(out, name)
@@ -52,7 +58,8 @@ def _system_python() -> str:
     raise RuntimeError("no system python found for the GTK drawing window")
 
 
-def _gtk_main(out_path: str, *, trackpad: bool = True) -> int:
+def _gtk_main(out_path: str, *, trackpad: bool = True, screenshot: str | None = None) -> int:
+    import cairo
     import gi
 
     gi.require_version("Gtk", "4.0")
@@ -63,241 +70,331 @@ def _gtk_main(out_path: str, *, trackpad: bool = True) -> int:
         raise SystemExit(
             "omepreview sig draw needs PyGObject cairo integration — install python3-gi-cairo."
         ) from exc
-    import cairo
-    from gi.repository import Gdk, Gtk
+    from gi.repository import Gdk, Gio, GLib, Gtk
 
-    strokes: list[list[tuple[float, float]]] = []
+    from .window_controls import window_controls_enabled
+
+    click_mode = not trackpad
+    glass_w = PAD_W - BEZEL * 2
+    glass_h = PAD_H - BEZEL * 2
+    session = RecorderSession(click_mode=click_mode, pad_size=(glass_w, glass_h))
     saved = False
-    state = {
-        "drawing": False,
-        "touchpad": False,
-        "pressure_axis": False,
-        "proximity_axis": False,
-    }
+    grab_release = lambda: None
+    idle_stroke_id = 0
+
+    def glass_rect():
+        return BEZEL, BEZEL, glass_w, glass_h
+
+    def in_glass(x: float, y: float) -> bool:
+        gx, gy, gw, gh = glass_rect()
+        return gx <= x <= gx + gw and gy <= y <= gy + gh
+
+    def to_glass(x: float, y: float) -> tuple[float, float]:
+        gx, gy, gw, gh = glass_rect()
+        return (
+            min(max(x - gx, 0.0), gw),
+            min(max(y - gy, 0.0), gh),
+        )
 
     def draw_func(_area, ctx, width, height):
-        ctx.set_source_rgb(1, 1, 1)
-        ctx.paint()
-        ctx.set_source_rgb(0.85, 0.85, 0.85)
-        ctx.set_line_width(1)
-        ctx.move_to(30, height * 0.72)
-        ctx.line_to(width - 30, height * 0.72)
-        ctx.stroke()
-        _paint_strokes(ctx, strokes, cairo)
+        _paint_trackpad(ctx, width, height, session, cairo)
 
-    def redraw(area):
-        area.queue_draw()
+    def redraw():
+        if area is not None:
+            area.queue_draw()
+        if hint is not None:
+            hint.set_text(
+                stroke_mode_label(
+                    armed=session.armed,
+                    click_mode=click_mode,
+                    has_ink=session.has_ink(),
+                )
+            )
+        if status is not None:
+            if not session.armed:
+                status.set_text("Press Space to start")
+            elif session.has_ink():
+                status.set_text("Recording — Enter saves")
+            else:
+                status.set_text("Recording — move on the trackpad")
 
-    def append_point(x: float, y: float, area):
-        if not state["drawing"]:
-            strokes.append([(x, y)])
-            state["drawing"] = True
-        elif strokes:
-            last = strokes[-1][-1]
-            if abs(last[0] - x) > 0.4 or abs(last[1] - y) > 0.4:
-                strokes[-1].append((x, y))
-        redraw(area)
+    def arm_recording():
+        nonlocal grab_release
+        grab_release()
+        session.handle_space()
+        release, confined = _grab_pointer(win, area)
+        grab_release = release
+        session.mapper.absolute = confined
+        redraw()
 
-    def end_stroke():
-        state["drawing"] = False
+    def release_grab():
+        nonlocal grab_release
+        grab_release()
+        grab_release = lambda: None
+        session.grab_pointer = False
 
-    def event_pressure(event) -> float | None:
-        if event is None:
-            return None
-        for axis in (Gdk.AxisUse.PRESSURE, Gdk.AxisUse.DISTANCE):
-            ok, val = event.get_axis(axis)
-            if ok:
-                if axis == Gdk.AxisUse.PRESSURE:
-                    state["pressure_axis"] = True
-                    return float(val)
-                if val < 1.0:
-                    state["proximity_axis"] = True
-        return None
+    def schedule_idle_end():
+        nonlocal idle_stroke_id
 
-    def event_source_name(event) -> str | None:
-        if event is None:
-            return None
-        device = event.get_device()
-        if device is None:
-            return None
-        try:
-            src = device.get_source()
-            return Gdk.InputSource.get_name(src.type_id) if src else None
-        except AttributeError:
-            return str(device.get_source())
-
-    def button1_down(event) -> bool:
-        if event is None:
+        def fire():
+            nonlocal idle_stroke_id
+            idle_stroke_id = 0
+            session.end_stroke()
             return False
-        return bool(event.get_state() & Gdk.ModifierType.BUTTON1_MASK)
 
-    app = Gtk.Application(application_id="org.omepreview.SignatureDraw")
+        if idle_stroke_id:
+            GLib.source_remove(idle_stroke_id)
+        idle_stroke_id = GLib.timeout_add(320, fire)
+
+    def on_motion_coords(x: float, y: float, *, button1: bool):
+        if not session.armed:
+            return
+        on_pad = in_glass(x, y)
+        if session.mapper.absolute and on_pad:
+            gx, gy = to_glass(x, y)
+            session.add_point(gx, gy, button1=button1)
+        else:
+            session.motion(x, y, button1=button1, on_glass=on_pad)
+        schedule_idle_end()
+        redraw()
+
+    def try_save() -> bool:
+        nonlocal saved
+        if not session.handle_enter():
+            win.set_title("Draw something first — Space to record")
+            redraw()
+            return False
+        release_grab()
+        session.write_svg(out_path)
+        saved = True
+        win.close()
+        return True
+
+    app = Gtk.Application(
+        application_id="org.omepreview.SignatureDraw",
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
+    )
 
     def on_activate(app):
-        nonlocal area, hint
-        win = Gtk.ApplicationWindow(application=app, title="Draw your signature")
-        win.set_default_size(CANVAS_W + 40, CANVAS_H + 120)
+        nonlocal area, hint, status, win
+        win = Gtk.ApplicationWindow(application=app, title="Create Signature")
+        win.set_default_size(PAD_W + 48, PAD_H + 150)
+        win.set_resizable(False)
 
-        header = Gtk.HeaderBar()
-        clear_btn = Gtk.Button(label="Clear")
-        save_btn = Gtk.Button(label="Save")
-        save_btn.add_css_class("suggested-action")
-        header.pack_start(clear_btn)
-        header.pack_end(save_btn)
-        win.set_titlebar(header)
+        if window_controls_enabled():
+            header = Gtk.HeaderBar()
+            header.set_show_title_buttons(True)
+            header.set_title_widget(Gtk.Label(label="Create Signature"))
+            win.set_titlebar(header)
+        else:
+            win.set_decorated(False)
 
         area = Gtk.DrawingArea()
-        area.set_content_width(CANVAS_W)
-        area.set_content_height(CANVAS_H)
+        area.set_content_width(PAD_W)
+        area.set_content_height(PAD_H)
+        area.set_hexpand(True)
+        area.set_vexpand(True)
         area.set_draw_func(draw_func)
+        area.set_focusable(True)
+        area.add_css_class("sig-pad")
 
-        if trackpad:
-            legacy = Gtk.EventControllerLegacy()
-            legacy.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
-            def on_legacy(_ctrl, event):
-                if event.type not in (
-                    Gdk.EventType.MOTION_NOTIFY,
-                    Gdk.EventType.TOUCH_BEGIN,
-                    Gdk.EventType.TOUCH_UPDATE,
-                    Gdk.EventType.TOUCH_END,
-                    Gdk.EventType.BUTTON_PRESS,
-                    Gdk.EventType.BUTTON_RELEASE,
-                ):
-                    return False
-                src = event_source_name(event)
-                if src and "touchpad" in src.lower():
-                    state["touchpad"] = True
-                pressure = event_pressure(event)
-                prox = bool(state["proximity_axis"])
-                active = should_capture(
-                    source_name=src,
-                    pressure=pressure,
-                    button1=button1_down(event),
-                    proximity_in=prox,
-                )
-                if event.type in (Gdk.EventType.TOUCH_END, Gdk.EventType.BUTTON_RELEASE):
-                    end_stroke()
-                    hint.set_text(
-                        stroke_mode_label(
-                            touchpad_detected=state["touchpad"],
-                            pressure_axis=state["pressure_axis"],
-                            proximity_axis=state["proximity_axis"],
-                        )
-                    )
-                    return False
-                if active and event.type in (
-                    Gdk.EventType.MOTION_NOTIFY,
-                    Gdk.EventType.TOUCH_BEGIN,
-                    Gdk.EventType.TOUCH_UPDATE,
-                    Gdk.EventType.BUTTON_PRESS,
-                ):
-                    ok, x, y = event.get_coords()
-                    if ok:
-                        append_point(x, y, area)
-                    return False
-                if event.type == Gdk.EventType.MOTION_NOTIFY and not active:
-                    end_stroke()
+        def on_key(_ctrl, keyval, _code, _state):
+            if keyval == Gdk.KEY_space:
+                arm_recording()
+                return True
+            if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+                try_save()
+                return True
+            if keyval == Gdk.KEY_Escape:
+                release_grab()
+                win.close()
+                return True
+            return False
+
+        keys.connect("key-pressed", on_key)
+        win.add_controller(keys)
+
+        motion = Gtk.EventControllerMotion()
+
+        def button1_from(ctrl) -> bool:
+            try:
+                return bool(ctrl.get_current_event_state() & Gdk.ModifierType.BUTTON1_MASK)
+            except Exception:
                 return False
 
-            legacy.connect("event", on_legacy)
-            area.add_controller(legacy)
+        def on_motion(ctrl, x, y):
+            on_motion_coords(x, y, button1=button1_from(ctrl))
 
-            stylus = Gtk.EventControllerStylus()
+        motion.connect("motion", on_motion)
+        area.add_controller(motion)
 
-            def on_stylus_proximity(_c, x, y, proximity):
-                state["proximity_axis"] = True
-                if proximity:
-                    append_point(x, y, area)
-                else:
-                    end_stroke()
-                hint.set_text(
-                    stroke_mode_label(
-                        touchpad_detected=state["touchpad"],
-                        pressure_axis=state["pressure_axis"],
-                        proximity_axis=state["proximity_axis"],
-                    )
-                )
+        legacy = Gtk.EventControllerLegacy()
+        legacy.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
-            def on_stylus_motion(_c, x, y):
-                pressure = _c.get_axis(Gdk.AxisUse.PRESSURE)
-                if pressure is not None:
-                    state["pressure_axis"] = True
-                if should_capture(
-                    source_name="stylus",
-                    pressure=pressure,
-                    button1=pressure is not None and pressure >= LIGHT_PRESSURE,
-                    proximity_in=True,
-                ):
-                    append_point(x, y, area)
+        def on_legacy(_ctrl, event):
+            et = event.type
+            if et in (Gdk.EventType.TOUCH_END, Gdk.EventType.BUTTON_RELEASE):
+                session.end_stroke()
+                redraw()
+                return False
+            if et not in (
+                Gdk.EventType.MOTION_NOTIFY,
+                Gdk.EventType.TOUCH_BEGIN,
+                Gdk.EventType.TOUCH_UPDATE,
+            ):
+                return False
+            ok, x, y = event.get_coords()
+            if not ok:
+                return False
+            button1 = bool(event.get_state() & Gdk.ModifierType.BUTTON1_MASK)
+            on_motion_coords(x, y, button1=button1)
+            return False
 
-            stylus.connect("proximity", on_stylus_proximity)
-            stylus.connect("motion", on_stylus_motion)
-            area.add_controller(stylus)
+        legacy.connect("event", on_legacy)
+        area.add_controller(legacy)
 
-        drag = Gtk.GestureDrag()
+        if click_mode:
+            session.mapper.absolute = True
+            drag = Gtk.GestureDrag()
 
-        def on_begin(_g, x, y):
-            strokes.append([(x, y)])
-            state["drawing"] = True
-            redraw(area)
+            def on_begin(_g, x, y):
+                if not session.armed:
+                    return
+                if in_glass(x, y):
+                    gx, gy = to_glass(x, y)
+                    session.add_point(gx, gy, button1=True)
+                    redraw()
 
-        def on_update(gesture, dx, dy):
-            ok, sx, sy = gesture.get_start_point()
-            if ok and strokes:
-                strokes[-1].append((sx + dx, sy + dy))
-                redraw(area)
+            def on_update(gesture, dx, dy):
+                if not session.armed:
+                    return
+                ok, sx, sy = gesture.get_start_point()
+                if ok:
+                    on_motion_coords(sx + dx, sy + dy, button1=True)
 
-        def on_end(_g, _x, _y):
-            end_stroke()
+            def on_end(_g, _x, _y):
+                session.end_stroke()
 
-        drag.connect("drag-begin", on_begin)
-        drag.connect("drag-update", on_update)
-        drag.connect("drag-end", on_end)
-        area.add_controller(drag)
+            drag.connect("drag-begin", on_begin)
+            drag.connect("drag-update", on_update)
+            drag.connect("drag-end", on_end)
+            area.add_controller(drag)
 
-        def on_clear(_b):
-            strokes.clear()
-            state["drawing"] = False
-            redraw(area)
+        def on_map(_w):
+            area.grab_focus()
+            if screenshot:
+                import os
 
-        def on_save(_b):
-            nonlocal saved
-            if not any(len(s) > 1 for s in strokes):
-                win.set_title("Draw something first…")
-                return
-            _export_png(strokes, out_path, cairo)
-            saved = True
-            win.close()
+                session.armed = os.environ.get("OMEPREVIEW_SIG_DEMO", "1") != "0"
+                session.grab_pointer = False
+                if session.armed:
+                    for i in range(0, 220):
+                        x = 36 + i * 1.7
+                        y = 150 + 28 * ((i % 40) / 20 - 1) ** 2 + i * 0.12
+                        session.add_point(x, y, button1=False)
+                redraw()
 
-        clear_btn.connect("clicked", on_clear)
-        save_btn.connect("clicked", on_save)
+                def dump():
+                    try:
+                        _dump_and_maybe_quit(win, screenshot)
+                    finally:
+                        release_grab()
+                        app.quit()
+                    return False
 
+                GLib.timeout_add(250, dump)
+
+        win.connect("map", on_map)
+        win.connect("close-request", lambda *_: (release_grab(), False)[1])
+
+        status = Gtk.Label(label="Press Space to start")
+        status.add_css_class("title-4")
         hint = Gtk.Label(
-            label=stroke_mode_label(
-                touchpad_detected=False,
-                pressure_axis=False,
-                proximity_axis=False,
-            )
+            label=stroke_mode_label(armed=False, click_mode=click_mode)
         )
         hint.add_css_class("dim-label")
         hint.set_wrap(True)
-        hint.set_max_width_chars(72)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
+        hint.set_justify(Gtk.Justification.CENTER)
+        hint.set_max_width_chars(64)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+        box.append(status)
         box.append(area)
         box.append(hint)
         win.set_child(box)
+        _install_css()
         win.present()
+        area.grab_focus()
 
     area = None
     hint = None
+    status = None
+    win = None
     app.connect("activate", on_activate)
     app.run(None)
     return 0 if saved else 1
+
+
+def _paint_trackpad(ctx, width, height, session: RecorderSession, cairo):
+    """Aluminum bezel + glass. The widget *is* the trackpad."""
+    # Desk behind the pad
+    ctx.set_source_rgb(0.91, 0.90, 0.88)
+    ctx.paint()
+
+    _round_rect(ctx, 0, 0, width, height, CORNER)
+    ctx.set_source_rgb(0.78, 0.78, 0.77)
+    ctx.fill_preserve()
+    ctx.set_source_rgb(0.62, 0.62, 0.61)
+    ctx.set_line_width(1.2)
+    ctx.stroke()
+
+    gx, gy, gw, gh = BEZEL, BEZEL, width - BEZEL * 2, height - BEZEL * 2
+    _round_rect(ctx, gx, gy, gw, gh, GLASS_CORNER)
+    if session.armed:
+        ctx.set_source_rgb(0.98, 0.98, 0.96)
+    else:
+        ctx.set_source_rgb(0.93, 0.93, 0.91)
+    ctx.fill_preserve()
+    ctx.set_source_rgba(0, 0, 0, 0.10)
+    ctx.set_line_width(1.0)
+    ctx.stroke()
+
+    # Recessed glass edge
+    _round_rect(ctx, gx + 1.5, gy + 1.5, gw - 3, gh - 3, GLASS_CORNER - 2)
+    ctx.set_source_rgba(1, 1, 1, 0.35)
+    ctx.set_line_width(1.0)
+    ctx.stroke()
+
+    ctx.save()
+    ctx.translate(gx, gy)
+    ctx.rectangle(0, 0, gw, gh)
+    # clip to glass (approx — rounded clip via path)
+    _round_rect(ctx, 0, 0, gw, gh, GLASS_CORNER - 2)
+    ctx.clip()
+    _paint_strokes(ctx, session.strokes, cairo)
+    if session.armed and session.mapper.pen and not session.has_ink() and session.drawing:
+        x, y = session.mapper.pen
+        ctx.set_source_rgba(0.05, 0.05, 0.2, 0.35)
+        ctx.arc(x, y, 2.2, 0, 6.3)
+        ctx.fill()
+    ctx.restore()
+
+
+def _round_rect(ctx, x, y, w, h, r):
+    r = min(r, w / 2, h / 2)
+    ctx.new_sub_path()
+    ctx.arc(x + w - r, y + r, r, -1.5708, 0)
+    ctx.arc(x + w - r, y + h - r, r, 0, 1.5708)
+    ctx.arc(x + r, y + h - r, r, 1.5708, 3.1416)
+    ctx.arc(x + r, y + r, r, 3.1416, 4.7124)
+    ctx.close_path()
 
 
 def _paint_strokes(ctx, strokes, cairo):
@@ -314,28 +411,191 @@ def _paint_strokes(ctx, strokes, cairo):
         ctx.stroke()
 
 
-def _export_png(strokes, out_path, cairo):
-    xs = [p[0] for s in strokes for p in s]
-    ys = [p[1] for s in strokes for p in s]
-    min_x, min_y = min(xs) - PAD, min(ys) - PAD
-    width = int(max(xs) - min_x + PAD * 2)
-    height = int(max(ys) - min_y + PAD * 2)
+def _install_css():
+    from gi.repository import Gdk, Gtk
 
-    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+    css = Gtk.CssProvider()
+    css.load_from_data(
+        b"""
+        .sig-pad { background: transparent; }
+        """
+    )
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+
+def _grab_pointer(win, area) -> tuple:
+    """Confine the pointer to the pad window while recording (X11).
+
+    GTK 4 removed gdk_seat_grab. On X11 we XGrabPointer + confine_to the
+    window so the OS cursor cannot wander the desktop. Returns
+    (release_callable, confined). Wayland: hide the window cursor and rely
+    on relative mapping.
+    """
+    from gi.repository import Gdk
+
+    native = win.get_native() if win is not None else None
+    surface = native.get_surface() if native is not None else None
+    if surface is None:
+        return (lambda: None, False)
+
+    blank = Gdk.Cursor.new_from_name("none")
+    try:
+        surface.set_cursor(blank)
+        if area is not None:
+            area.set_cursor(blank)
+    except Exception:
+        pass
+
+    ungrab_x = _x11_grab_pointer(surface)
+
+    def release():
+        if ungrab_x:
+            ungrab_x()
+        try:
+            surface.set_cursor(None)
+            if area is not None:
+                area.set_cursor(None)
+        except Exception:
+            pass
+
+    return release, ungrab_x is not None
+
+
+def _x11_grab_pointer(surface):
+    try:
+        import gi
+
+        gi.require_version("GdkX11", "4.0")
+        from gi.repository import GdkX11
+    except (ImportError, ValueError):
+        return None
+    if not isinstance(surface, GdkX11.X11Surface):
+        return None
+    lib_name = ctypes.util.find_library("X11")
+    if not lib_name:
+        return None
+    libX11 = ctypes.CDLL(lib_name)
+    libX11.XGrabPointer.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    libX11.XGrabPointer.restype = ctypes.c_int
+    libX11.XUngrabPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    libX11.XWarpPointer.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.c_int,
+        ctypes.c_int,
+    ]
+    try:
+        display = surface.get_display()
+        xdisplay = GdkX11.X11Display.get_xdisplay(display)
+        xid = int(surface.get_xid())
+        xdisplay_p = ctypes.c_void_p(int(xdisplay))
+    except Exception:
+        return None
+    # PointerMotionMask | ButtonPressMask | ButtonReleaseMask | Button1MotionMask
+    event_mask = (1 << 6) | (1 << 2) | (1 << 3) | (1 << 8)
+    GrabModeAsync = 1
+    try:
+        status = libX11.XGrabPointer(
+            xdisplay_p,
+            xid,
+            1,
+            event_mask,
+            GrabModeAsync,
+            GrabModeAsync,
+            xid,  # confine to this window
+            0,
+            0,  # CurrentTime
+        )
+    except Exception:
+        return None
+    if status != 0:
+        return None
+    try:
+        libX11.XWarpPointer(
+            xdisplay_p, 0, xid, 0, 0, 0, 0, int(PAD_W / 2), int(PAD_H / 2)
+        )
+    except Exception:
+        pass
+
+    def ungrab():
+        try:
+            libX11.XUngrabPointer(xdisplay_p, 0)
+        except Exception:
+            pass
+
+    return ungrab
+
+
+def _dump_and_maybe_quit(win, path: str) -> None:
+    try:
+        _snapshot_window(win, path)
+    except Exception as exc:
+        print(f"screenshot failed: {exc}", file=sys.stderr)
+
+
+def _snapshot_window(win, path: str) -> None:
+    from gi.repository import Graphene, Gtk
+
+    native = win.get_native()
+    renderer = native.get_renderer() if native is not None else None
+    paintable = Gtk.WidgetPaintable.new(win)
+    width = max(win.get_width(), 1)
+    height = max(win.get_height(), 1)
+    snapshot = Gtk.Snapshot()
+    paintable.snapshot(snapshot, width, height)
+    node = snapshot.to_node()
+    if node is None or renderer is None:
+        raise RuntimeError("GTK renderer produced no scene node")
+    rect = Graphene.Rect()
+    rect.init(0, 0, float(width), float(height))
+    texture = renderer.render_texture(node, rect)
+    texture.save_to_png(path)
+
+
+def render_pad_png(path: str | Path, session: RecorderSession | None = None) -> Path:
+    """Paint the trackpad surface to PNG without opening a window (docs / tests)."""
+    import cairo
+
+    path = Path(path)
+    session = session or RecorderSession(pad_size=(PAD_W - BEZEL * 2, PAD_H - BEZEL * 2))
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, PAD_W, PAD_H)
     ctx = cairo.Context(surface)
-    ctx.translate(-min_x, -min_y)
-    _paint_strokes(ctx, strokes, cairo)
-    surface.write_to_png(out_path)
+    _paint_trackpad(ctx, PAD_W, PAD_H, session, cairo)
+    surface.write_to_png(str(path))
+    return path
 
 
 if __name__ == "__main__":
     trackpad = True
-    if len(sys.argv) == 3:
-        trackpad = sys.argv[2] != "0"
-        out = sys.argv[1]
-    elif len(sys.argv) == 2:
-        out = sys.argv[1]
+    screenshot = None
+    args = sys.argv[1:]
+    if "--screenshot" in args:
+        i = args.index("--screenshot")
+        screenshot = args[i + 1]
+        del args[i : i + 2]
+    if len(args) == 2:
+        trackpad = args[1] != "0"
+        out = args[0]
+    elif len(args) == 1:
+        out = args[0]
     else:
-        print("usage: draw.py <output.png> [trackpad:0|1]", file=sys.stderr)
+        print("usage: draw.py <output.svg> [trackpad:0|1] [--screenshot png]", file=sys.stderr)
         sys.exit(2)
-    sys.exit(_gtk_main(out, trackpad=trackpad))
+    sys.exit(_gtk_main(out, trackpad=trackpad, screenshot=screenshot))

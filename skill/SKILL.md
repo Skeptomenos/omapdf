@@ -114,8 +114,9 @@ show-in-folder).
 - **Finish for sending:** offer `omepreview flatten out.pdf -o final.pdf` when
   the copy is going to someone else; keep the unflattened version.
 - Password-protected PDFs are refused — ask the user to decrypt.
-- No signature saved? `omepreview sig draw` opens the drawing window. Never
-  fabricate a signature, never sign unbidden, never invent form data.
+- No signature saved? `omepreview sig draw` opens the trackpad recorder
+  (Space / finger-glide / Enter → SVG). Never fabricate a signature, never
+  sign unbidden, never invent form data.
 - Visual signing only; cryptographic (certificate) signing is on the
   roadmap — say so, don't improvise it.
 - `omepreview open doc.pdf` opens the omepreview editor for the user (detach GUI

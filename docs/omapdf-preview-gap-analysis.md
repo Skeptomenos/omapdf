@@ -225,7 +225,7 @@ Do not sacrifice these to imitate Preview.
 | Loupe | Yes | No | Missing — P3 |
 | Edit/delete existing annots | Yes | Roadmap | Partial — P1 (already planned) |
 | Fill forms | Yes + AutoFill | `fill_field` + MCP | Partial — GUI form click-to-fill P1 |
-| Visual signatures | Trackpad / camera / iOS | Draw window + PNG store | Have (input methods differ) |
+| Visual signatures | Trackpad / camera / iOS | Trackpad SVG recorder + dropdown drag-place | Have (input methods differ) |
 | Crypto sign | No | Roadmap | Beyond Preview |
 | **Redact text** | Redact Selection | Roadmap “later” | **Missing — P0** |
 | **Redact region / image** | Box redact | No | **Missing — P0** |

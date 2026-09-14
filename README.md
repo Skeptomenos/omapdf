@@ -15,6 +15,8 @@ omepreview is a fast GTK4 editor for reading, marking up, and signing PDFs — w
 </p>
 
 <p align="center">
+  <img src="docs/screenshots/gtk-signature-draw.png" alt="omepreview — trackpad signature recorder" width="420" />
+  &nbsp;
   <img src="docs/screenshots/gtk-light-save-ghost.png" alt="omepreview — ghost Save on the overlay rail" width="200" />
 </p>
 
@@ -51,7 +53,7 @@ Arch: [`packaging/PKGBUILD`](packaging/PKGBUILD) (`pkgver=0.0.1`).
 ```bash
 omepreview edit document.pdf
 omepreview read document.pdf --json
-omepreview sig draw                   # trackpad light-touch; --click for mouse
+omepreview sig draw                   # Space to record, finger glide, Enter saves SVG
 omepreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
 omepreview --version                  # omepreview 0.0.1
 ```

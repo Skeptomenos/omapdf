@@ -71,10 +71,11 @@ document's actual field list in the error. Report adds `page`.
 {"op": "place_signature", "page": 4, "at": [120, 540], "width": 180,
  "signature": "default", "date": true}
 ```
-Stamps a saved signature PNG with its top-left corner at `at`, scaled to
-`width` points (height keeps the image's aspect ratio). `signature` names an
-image saved via `omepreview sig add` (default: `"default"`). `date: true` writes
-today's ISO date below. Report adds `rect` (and `date`).
+Stamps a saved signature **SVG** (or an imported PNG) with its top-left
+corner at `at`, scaled to `width` points (height keeps the image's aspect
+ratio). `signature` names a file saved via `omepreview sig draw` / `sig add`
+(default: `"default"`). `date: true` writes today's ISO date below. Report
+adds `rect` (and `date`).
 
 Note: the image is inserted into page content, not as an annotation — it
 survives every viewer and doesn't need flattening.

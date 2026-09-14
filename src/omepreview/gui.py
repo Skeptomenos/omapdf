@@ -36,7 +36,7 @@ except (ImportError, ValueError) as exc:
     ) from exc
 import cairo
 import pymupdf
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
+from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango, PangoCairo
 
 from . import engine
 from . import gui_pages
@@ -384,8 +384,9 @@ headerbar.omapdf-window-controls button.titlebutton {
 """
 
 
-def _png_surface(path: str) -> cairo.ImageSurface:
-    return cairo.ImageSurface.create_from_png(path)
+def _signature_surface(path: str) -> cairo.ImageSurface:
+    pix = sig_store.rasterize(path)
+    return cairo.ImageSurface.create_from_png(io.BytesIO(pix.tobytes("png")))
 
 
 class Editor:
@@ -400,7 +401,8 @@ class Editor:
         self.selected: dict | None = None
         self.tool = "select"
         self.page_surface: cairo.ImageSurface | None = None
-        self.sig_surface: cairo.ImageSurface | None = None
+        self.sig_name = "default"
+        self.sig_surfaces: dict[str, cairo.ImageSurface | None] = {}
         self.live_stroke: list[tuple[float, float]] | None = None
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
@@ -522,17 +524,21 @@ class Editor:
         self.selected = None
         return True
 
-    def sig_aspect(self) -> float:
-        surface = self._ensure_sig()
+    def sig_aspect(self, name: str | None = None) -> float:
+        surface = self._ensure_sig(name)
         return surface.get_height() / surface.get_width() if surface else 0.4
 
-    def _ensure_sig(self):
-        if self.sig_surface is None:
+    def _ensure_sig(self, name: str | None = None):
+        name = name or self.sig_name
+        if name not in self.sig_surfaces:
             try:
-                self.sig_surface = _png_surface(str(sig_store.get("default")))
+                self.sig_surfaces[name] = _signature_surface(str(sig_store.get(name)))
             except FileNotFoundError:
-                self.sig_surface = None
-        return self.sig_surface
+                self.sig_surfaces[name] = None
+        return self.sig_surfaces[name]
+
+    def invalidate_sigs(self) -> None:
+        self.sig_surfaces.clear()
 
     def _load_proposals(self, ops_file: str):
         payload = json.loads(Path(ops_file).read_text())
@@ -541,9 +547,11 @@ class Editor:
             page = op.get("page", 1) - 1
             if kind == "place_signature":
                 w = float(op.get("width", 180))
+                name = op.get("signature", "default")
                 self.pending.append({
                     "kind": "sig", "page": page, "x": op["at"][0], "y": op["at"][1],
-                    "w": w, "h": w * self.sig_aspect(), "date": bool(op.get("date")),
+                    "w": w, "h": w * self.sig_aspect(name), "date": bool(op.get("date")),
+                    "signature": name,
                 })
             elif kind == "text_box":
                 r = op["rect"]
@@ -616,6 +624,7 @@ class Editor:
             if it["kind"] == "sig":
                 ops.append({"op": "place_signature", "page": page,
                             "at": [it["x"], it["y"]], "width": it["w"],
+                            "signature": it.get("signature", "default"),
                             "date": it.get("date", False)})
             elif it["kind"] == "text":
                 w = max(40.0, len(it["text"]) * it["size"] * 0.6)
@@ -964,7 +973,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def draw_item(ctx, it):
             if it["kind"] == "sig":
-                surface = ed._ensure_sig()
+                surface = ed._ensure_sig(it.get("signature") or ed.sig_name)
                 if surface:
                     ctx.save()
                     ctx.translate(it["x"], it["y"])
@@ -1223,6 +1232,53 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.selected = item
             set_tool("select")
 
+        sig_ui = {"rebuild": lambda: None}
+
+        def next_sig_name() -> str:
+            names = set(sig_store.list_names())
+            if "default" not in names:
+                return "default"
+            n = 2
+            while f"signature-{n}" in names:
+                n += 1
+            return f"signature-{n}"
+
+        def record_signature(name: str) -> bool:
+            import subprocess
+
+            toast("Record your signature on the trackpad…")
+            proc = subprocess.run(
+                [sys.executable, "-m", "omepreview.cli", "sig", "draw", "--name", name],
+                env=os.environ.copy(),
+            )
+            ed.invalidate_sigs()
+            if proc.returncode != 0:
+                toast("Signature capture cancelled")
+                return False
+            ed.sig_name = name
+            toast(f"Saved {name!r} — drag it onto the page")
+            sig_ui["rebuild"]()
+            return True
+
+        def place_named_signature(name: str, px: float, py: float) -> bool:
+            ed.sig_name = name
+            if ed._ensure_sig(name) is None:
+                return False
+            ed.checkpoint()
+            w = 160.0
+            aspect = ed.sig_aspect(name)
+            item = {
+                "kind": "sig", "page": ed.page_no,
+                "x": px - w / 2, "y": py - w * aspect / 2,
+                "w": w, "h": w * aspect, "date": False, "signature": name,
+            }
+            ed.pending.append(item)
+            ed.selected = item
+            set_tool("select")
+            area.queue_draw()
+            refresh_title()
+            return True
+
         click = Gtk.GestureClick()
 
         def on_click(_g, n_press, cx, cy):
@@ -1239,29 +1295,17 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 else:
                     prompt_note(px, py)
             elif ed.tool == "sign":
-                if ed._ensure_sig() is None:
-                    import subprocess
-
-                    toast("Record your signature on the trackpad…")
-                    proc = subprocess.run(
-                        [sys.executable, "-m", "omepreview.cli", "sig", "draw"],
-                        env=os.environ.copy(),
-                    )
-                    ed.sig_surface = None
-                    if proc.returncode != 0:
-                        toast("Signature capture cancelled")
-                        return
-                    toast("Signature saved — click to place")
-                    if ed._ensure_sig() is None:
-                        return
-                ed.checkpoint()
-                w = 160.0
-                item = {"kind": "sig", "page": ed.page_no, "x": px - w / 2,
-                        "y": py - w * ed.sig_aspect() / 2, "w": w,
-                        "h": w * ed.sig_aspect(), "date": False}
-                ed.pending.append(item)
-                ed.selected = item
-                set_tool("select")
+                name = ed.sig_name
+                if ed._ensure_sig(name) is None:
+                    names = sig_store.list_names()
+                    if names:
+                        name = names[0]
+                        ed.sig_name = name
+                    else:
+                        name = "default"
+                        if not record_signature(name):
+                            return
+                place_named_signature(name, px, py)
             elif ed.tool == "check":
                 add_stamp(CHECK, CHECK_COLOR, px, py)
             elif ed.tool == "cross":
@@ -1290,6 +1334,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         click.connect("pressed", on_click)
         area.add_controller(click)
+
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.COPY)
+
+        def on_sig_drop(_target, value, x, y):
+            text = str(value)
+            if not text.startswith("omepreview-sig:"):
+                return False
+            name = text.split(":", 1)[1]
+            px, py = to_page_point(x, y)
+            return place_named_signature(name, px, py)
+
+        drop.connect("drop", on_sig_drop)
+        area.add_controller(drop)
 
         # Hovering a note/text (pending or saved) previews its content.
         area.set_has_tooltip(True)
@@ -1704,7 +1761,129 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         make_tool("highlight", "Highlighter — drag across a region", paint_highlighter)
         make_tool("text", "Text — click to type onto the page", paint_text)
         make_tool("note", "Sticky note — click to leave a comment", paint_note)
-        make_tool("sign", "Sign — click to place your signature", paint_sign)
+        sign_btn = make_tool(
+            "sign",
+            "Sign — pick a saved signature and drag it onto the page",
+            paint_sign,
+        )
+        sign_pop = Gtk.Popover()
+        sign_pop.set_parent(sign_btn)
+        sign_pop.set_position(Gtk.PositionType.LEFT)
+        sign_pop.set_autohide(True)
+        sign_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        sign_box.set_margin_top(8)
+        sign_box.set_margin_bottom(8)
+        sign_box.set_margin_start(8)
+        sign_box.set_margin_end(8)
+        sign_pop.set_child(sign_box)
+
+        def _clear_box(box):
+            child = box.get_first_child()
+            while child is not None:
+                nxt = child.get_next_sibling()
+                box.remove(child)
+                child = nxt
+
+        def rebuild_sign_popover():
+            _clear_box(sign_box)
+            names = sig_store.list_names()
+            if not names:
+                empty = Gtk.Label(label="No signatures yet — record one")
+                empty.add_css_class("dim-label")
+                empty.set_wrap(True)
+                empty.set_xalign(0)
+                sign_box.append(empty)
+            for name in names:
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                row.set_margin_top(2)
+                row.set_margin_bottom(2)
+                thumb = Gtk.DrawingArea()
+                thumb.set_content_width(96)
+                thumb.set_content_height(36)
+                surface = ed._ensure_sig(name)
+
+                def paint_thumb(_a, ctx, w, h, surf=surface, selected=(name == ed.sig_name)):
+                    ctx.set_source_rgb(1, 1, 1)
+                    ctx.paint()
+                    if selected:
+                        ctx.set_source_rgb(0.15, 0.45, 0.95)
+                        ctx.set_line_width(1.5)
+                        ctx.rectangle(0.75, 0.75, w - 1.5, h - 1.5)
+                        ctx.stroke()
+                    if surf is None:
+                        return
+                    scale = min(w / max(surf.get_width(), 1), h / max(surf.get_height(), 1))
+                    dw, dh = surf.get_width() * scale, surf.get_height() * scale
+                    ctx.translate((w - dw) / 2, (h - dh) / 2)
+                    ctx.scale(scale, scale)
+                    ctx.set_source_surface(surf, 0, 0)
+                    ctx.paint()
+
+                thumb.set_draw_func(paint_thumb)
+                label = Gtk.Label(label=name, xalign=0)
+                label.set_hexpand(True)
+                row.append(thumb)
+                row.append(label)
+                drag = Gtk.DragSource()
+                drag.set_actions(Gdk.DragAction.COPY)
+
+                def on_prepare(_src, _x, _y, n=name):
+                    return Gdk.ContentProvider.new_for_value(f"omepreview-sig:{n}")
+
+                drag.connect("prepare", on_prepare)
+                row.add_controller(drag)
+                pick = Gtk.GestureClick()
+
+                def on_pick(_g, _n, _x, _y, n=name):
+                    ed.sig_name = n
+                    set_tool("sign")
+                    rebuild_sign_popover()
+
+                pick.connect("pressed", on_pick)
+                row.add_controller(pick)
+                sign_box.append(row)
+            rec = Gtk.Button(label="Record new…")
+            rec.add_css_class("suggested-action")
+
+            def on_record(_b):
+                sign_pop.popdown()
+                record_signature(next_sig_name())
+
+            rec.connect("clicked", on_record)
+            sign_box.append(rec)
+            if names:
+                rer = Gtk.Button(label=f"Re-record {ed.sig_name!r}…")
+
+                def on_rerecord(_b, n=ed.sig_name):
+                    sign_pop.popdown()
+                    record_signature(n)
+
+                rer.connect("clicked", on_rerecord)
+                sign_box.append(rer)
+            hint = Gtk.Label(
+                label="Select one, then drag it onto the page. Space/Enter in the recorder.",
+                wrap=True,
+                xalign=0,
+            )
+            hint.add_css_class("dim-label")
+            sign_box.append(hint)
+
+        sig_ui["rebuild"] = rebuild_sign_popover
+        sign_state = {"just_activated": False}
+        sign_btn.connect(
+            "toggled",
+            lambda b: b.get_active() and sign_state.__setitem__("just_activated", True),
+        )
+
+        def on_sign_clicked(_b):
+            rebuild_sign_popover()
+            if sign_state["just_activated"]:
+                sign_state["just_activated"] = False
+                sign_pop.popup()
+            elif ed.tool == "sign":
+                sign_pop.popup()
+
+        sign_btn.connect("clicked", on_sign_clicked)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
         make_tool("cross", "Cross-out stamp — places an ✕ on the page", paint_cross)
         shape_btn = make_tool(

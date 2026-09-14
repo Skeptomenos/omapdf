@@ -90,15 +90,18 @@ def _apply_fill_field(doc, op) -> dict:
 
 def _apply_place_signature(doc, op) -> dict:
     page = _page(doc, op["page"])
-    png = sig_store.get(op["signature"])
-    pix = pymupdf.Pixmap(str(png))
-    if pix.width == 0 or pix.height == 0:
-        raise OpError(f"signature image {png} is empty")
+    image = sig_store.get(op["signature"])
+    try:
+        ratio = sig_store.aspect_ratio(image)
+    except Exception as exc:
+        raise OpError(f"signature {image} could not be read: {exc}") from exc
+    if ratio <= 0:
+        raise OpError(f"signature image {image} is empty")
     width = op["width"]
-    height = width * pix.height / pix.width
+    height = width * ratio
     x, y = op["at"]
     rect = pymupdf.Rect(x, y, x + width, y + height)
-    page.insert_image(rect, filename=str(png), keep_proportion=True)
+    sig_store.insert_on_page(page, rect, image)
 
     result = {"rect": list(rect), "signature": op["signature"]}
     if op["date"]:

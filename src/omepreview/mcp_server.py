@@ -108,7 +108,7 @@ def place_signature(
 
 @mcp.tool()
 def list_signatures() -> list[str]:
-    """Names of the user's saved signature images."""
+    """Names of the user's saved signatures (SVG in ~/.config/omepreview/signatures/)."""
     return signature.list_names()
 
 

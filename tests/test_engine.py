@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -39,11 +40,17 @@ def sample_pdf(tmp_path):
 def sig_home(tmp_path, monkeypatch):
     """Isolate the signature store and save a tiny 'signature'."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 120, 40), True)
-    png = tmp_path / "sig.png"
-    pix.save(str(png))
-    signature.add(png, "default")
-    return png
+    svg = tmp_path / "sig.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" '
+        'viewBox="0 0 120 40">'
+        '<path d="M 5 30 C 20 5 40 5 60 20 S 100 35 115 10" '
+        'fill="none" stroke="#111133" stroke-width="3" stroke-linecap="round"/>'
+        "</svg>\n",
+        encoding="utf-8",
+    )
+    signature.add(svg, "default")
+    return svg
 
 
 def test_read_extracts_text_and_fields(sample_pdf):
@@ -106,8 +113,12 @@ def test_place_signature_with_date(sample_pdf, sig_home, tmp_path):
     )
     placement = result["applied"][0]
     assert placement["rect"][2] - placement["rect"][0] == pytest.approx(150)
+    assert Path(signature.get("default")).suffix == ".svg"
     assert "date" in placement
-    assert out.is_file()
+    doc = pymupdf.open(out)
+    pix = doc[1].get_pixmap(clip=pymupdf.Rect(placement["rect"]), alpha=False)
+    doc.close()
+    assert min(pix.samples) < 200
 
 
 def test_dry_run_writes_nothing(sample_pdf, sig_home):
