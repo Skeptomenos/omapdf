@@ -24,6 +24,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
 try:
     gi.require_foreign("cairo")
 except (ImportError, ValueError) as exc:
@@ -33,7 +35,7 @@ except (ImportError, ValueError) as exc:
     ) from exc
 import cairo
 import pymupdf
-from gi.repository import Gdk, Gio, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 
 from . import engine
 from . import gui_pages
@@ -56,12 +58,10 @@ PEN_COLORS = [
 ]
 NOTE_SIZE = 20.0  # points, drawn sticky-note glyph
 SELECT_COLOR = (0.15, 0.45, 0.95)
-# macOS Preview–style page chrome (dark canvas, paper sheet, edge + shadow).
-CANVAS_BG = (0.22, 0.22, 0.24)
-PAGE_MARGIN_PX = 32
-PAGE_SHADOW_OFFSET = 4
-PAGE_SHADOW_ALPHA = 0.38
-PAGE_BORDER = (0.50, 0.50, 0.54)
+PAGE_MARGIN_PX = 48
+SHADOWS_LIGHT = ((16, 22, 0.12), (3, 5, 0.08), (1, 1.2, 0.14))
+SHADOWS_DARK = ((18, 26, 0.55), (4, 7, 0.35), (1, 1.5, 0.5))
+PAPER_EDGE_ALPHA = 0.08
 
 
 def _norm_rect(it: dict) -> tuple[float, float, float, float]:
@@ -115,67 +115,190 @@ def _draw_shape(
         ctx.stroke()
         ctx.restore()
 
-CSS = b"""
-box.omapdf-overlay-toolbar {
-  background: alpha(@theme_bg_color, 0.82);
-  border-left: 1px solid alpha(currentColor, 0.18);
-  padding: 6px 4px;
-  margin: 8px 8px 8px 0;
-}
+
+def _luminance(r: float, g: float, b: float) -> float:
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _theme_colors(widget: Gtk.Widget) -> tuple[tuple[float, float, float], tuple[float, float, float], bool]:
+    style = widget.get_style_context()
+    bg = style.lookup_color("theme_bg_color")[1]
+    fg = style.lookup_color("theme_fg_color")[1]
+    light = _luminance(bg.red, bg.green, bg.blue) > 0.5
+    return (bg.red, bg.green, bg.blue), (fg.red, fg.green, fg.blue), light
+
+
+def _desk_rgb(bg: tuple[float, float, float], light: bool) -> tuple[float, float, float]:
+    factor = 0.95 if light else 0.62
+    return tuple(max(0.0, min(1.0, c * factor)) for c in bg)
+
+
+def _draw_paper_shadow(
+    ctx: cairo.Context,
+    ox: float,
+    oy: float,
+    pw: float,
+    ph: float,
+    layers: tuple[tuple[float, float, float], ...],
+) -> None:
+    for dy, blur, alpha in layers:
+        spread = blur * 0.45
+        ctx.set_source_rgba(0, 0, 0, alpha)
+        ctx.rectangle(
+            ox - spread * 0.5,
+            oy + dy - spread * 0.3,
+            pw + spread,
+            ph + spread * 0.6,
+        )
+        ctx.fill()
+
+
+def _draw_folio(
+    ctx: cairo.Context,
+    text: str,
+    x: float,
+    y: float,
+    fg: tuple[float, float, float],
+    alpha: float,
+) -> None:
+    layout = PangoCairo.create_layout(ctx)
+    layout.set_font_description(Pango.FontDescription("monospace 10.5"))
+    layout.set_text(text, -1)
+    _, th = layout.get_pixel_size()
+    ctx.move_to(x, y - th)
+    ctx.set_source_rgba(fg[0], fg[1], fg[2], alpha)
+    PangoCairo.update_layout(ctx, layout)
+    PangoCairo.show_layout(ctx, layout)
+
+
+def _editorial_css(light: bool) -> bytes:
+    desk_factor = "0.95" if light else "0.62"
+    thumb_muted = "0.6" if light else "0.72"
+    return f"""
+@define-color omapdf_desk shade(@theme_bg_color, {desk_factor});
+
+window.omapdf-editor, scrolledwindow.omapdf-thumb-rail, listbox.omapdf-thumbs {{
+  background: @omapdf_desk;
+}}
+scrolledwindow.omapdf-page-canvas {{
+  background: @omapdf_desk;
+}}
+
+box.omapdf-overlay-toolbar {{
+  background-image: linear-gradient(to right,
+    alpha(@omapdf_desk, 0), alpha(@omapdf_desk, 0.94) 10px, alpha(@omapdf_desk, 0.94));
+  border: none;
+  padding: 14px 0;
+  margin: 0;
+  min-width: 44px;
+}}
 box.omapdf-overlay-toolbar button.tool-slim,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button {
+box.omapdf-overlay-toolbar menubutton.tool-slim > button {{
   background: transparent;
   border: none;
   box-shadow: none;
   border-radius: 0;
-  padding-left: 8px;
-  padding-right: 8px;
-  min-width: 0;
+  min-width: 28px;
   min-height: 28px;
-}
+  padding: 0;
+  margin: 2px 8px;
+  opacity: 0.62;
+  transition: opacity 120ms ease;
+}}
 box.omapdf-overlay-toolbar button.tool-slim:hover,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button:hover {
-  background: alpha(currentColor, 0.08);
-}
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:hover {{
+  opacity: 1;
+  background: transparent;
+}}
 box.omapdf-overlay-toolbar button.tool-slim:active,
-box.omapdf-overlay-toolbar menubutton.tool-slim > button:active {
-  background: alpha(currentColor, 0.16);
-}
-box.omapdf-overlay-toolbar button.tool-slim:checked {
-  background: alpha(currentColor, 0.18);
-}
+box.omapdf-overlay-toolbar menubutton.tool-slim > button:active {{
+  background: alpha(currentColor, 0.08);
+  border-radius: 3px;
+}}
+box.omapdf-overlay-toolbar button.tool-slim:checked {{
+  opacity: 1;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 12px 1.5px;
+  background-repeat: no-repeat;
+  background-position: 50% calc(100% - 3px);
+}}
+box.omapdf-overlay-toolbar button.tool-slim:disabled {{
+  opacity: 0.25;
+}}
 box.omapdf-overlay-toolbar button.tool-icon,
-box.omapdf-overlay-toolbar menubutton.tool-icon > button {
+box.omapdf-overlay-toolbar menubutton.tool-icon > button {{
   padding: 5px;
   min-width: 28px;
   min-height: 28px;
-}
-box.omapdf-overlay-toolbar .page-indicator { opacity: 0.85; font-weight: 500; }
-box.omapdf-overlay-toolbar separator {
-  background: alpha(currentColor, 0.22);
-  margin-top: 4px;
-  margin-bottom: 4px;
-  min-height: 1px;
-}
-label.toast-banner {
-  background: alpha(currentColor, 0.88);
+}}
+box.omapdf-overlay-toolbar .page-indicator,
+box.omapdf-overlay-toolbar .zoom-indicator {{
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: normal;
+  font-feature-settings: "tnum";
+  letter-spacing: 0.02em;
+  opacity: 0.62;
+}}
+box.omapdf-overlay-toolbar separator {{
+  background: transparent;
+  min-height: 14px;
+}}
+button.omapdf-ghost {{
+  background: transparent;
+  border: 1px solid alpha(currentColor, 0.28);
+  color: alpha(currentColor, 0.38);
+  border-radius: 0;
+  min-width: 36px;
+  min-height: 24px;
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  margin: 2px 8px;
+}}
+button.omapdf-ink {{
+  background: @theme_fg_color;
   color: @theme_bg_color;
+  border: none;
   border-radius: 0;
-  padding: 7px 16px;
-  margin-top: 8px;
-}
-listbox row.omapdf-thumb-selected {
-  background: alpha(currentColor, 0.18);
+  min-width: 36px;
+  min-height: 24px;
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  margin: 2px 8px;
+}}
+label.toast-banner {{
+  background: @theme_fg_color;
+  color: @theme_bg_color;
+  font-family: monospace;
+  font-size: 10.5px;
+  padding: 7px 14px;
   border-radius: 0;
-}
-listbox row.omapdf-thumb-inserted {
-  border: 1px solid alpha(currentColor, 0.35);
-  border-radius: 0;
-}
-scrolledwindow.omapdf-page-canvas {
-  background-color: alpha(currentColor, 0.12);
-}
-"""
+  margin-bottom: 24px;
+}}
+listbox.omapdf-thumbs row {{
+  background: transparent;
+  padding: 0;
+}}
+listbox.omapdf-thumbs row:not(.omapdf-thumb-selected) {{
+  opacity: {thumb_muted};
+}}
+listbox.omapdf-thumbs row.omapdf-thumb-selected picture.omapdf-thumb {{
+  box-shadow: 0 3px 5px alpha(black, 0.08), 0 1px 1px alpha(black, 0.14);
+}}
+listbox.omapdf-thumbs row label {{
+  font-family: monospace;
+  font-size: 10px;
+  opacity: 0.42;
+}}
+listbox.omapdf-thumbs row.omapdf-thumb-selected label {{
+  opacity: 0.9;
+}}
+listbox.omapdf-thumbs row.omapdf-thumb-inserted label {{
+  opacity: 0.62;
+}}
+""".encode()
 
 
 def _png_surface(path: str) -> cairo.ImageSurface:
@@ -549,7 +672,14 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         win = Gtk.ApplicationWindow(application=app)
         win.set_default_size(980, 900)
         win.set_decorated(False)
+        win.add_css_class("omapdf-editor")
         ed.window = win
+        chrome = {
+            "desk": (0.92, 0.91, 0.91),
+            "fg": (0.18, 0.2, 0.21),
+            "light": True,
+            "shadows": SHADOWS_LIGHT,
+        }
 
         area = Gtk.DrawingArea()
         sidebar_api = {
@@ -567,10 +697,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             "cut_selected_pages": lambda: False,
         }
 
+        save_style_hook = {"fn": lambda: None}
+
         def refresh_title():
             dirty = ed.pending or ed.page_preview.has_changes()
             dot = " •" if dirty else ""
             win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
+            save_style_hook["fn"]()
 
         def viewport_width() -> float:
             # Prefer the scroller's allocated width — hadjustment page-size can
@@ -647,30 +780,28 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def draw(_a, ctx, w, h):
             ctx.save()
-            ctx.set_source_rgb(*CANVAS_BG)
+            desk = chrome["desk"]
+            fg = chrome["fg"]
+            ctx.set_source_rgb(*desk)
             ctx.rectangle(0, 0, w, h)
             ctx.fill()
             ox, oy = ed.page_origin
             pw, ph = ed.paper_px
             if pw > 0 and ph > 0:
-                ctx.set_source_rgba(0, 0, 0, PAGE_SHADOW_ALPHA)
-                ctx.rectangle(
-                    ox + PAGE_SHADOW_OFFSET,
-                    oy + PAGE_SHADOW_OFFSET,
-                    pw,
-                    ph,
-                )
-                ctx.fill()
+                folio = f"{Path(ed.path).name} · {ed.page_count()} pages"
+                _draw_folio(ctx, folio, ox, oy - 13, fg, 0.5)
+                _draw_paper_shadow(ctx, ox, oy, pw, ph, chrome["shadows"])
                 ctx.set_source_rgb(1, 1, 1)
                 ctx.rectangle(ox, oy, pw, ph)
                 ctx.fill()
                 if ed.page_surface:
                     ctx.set_source_surface(ed.page_surface, ox, oy)
                     ctx.paint()
-                ctx.set_source_rgb(*PAGE_BORDER)
-                ctx.set_line_width(1.0)
-                ctx.rectangle(ox, oy, pw, ph)
-                ctx.stroke()
+                if chrome["light"]:
+                    ctx.set_source_rgba(fg[0], fg[1], fg[2], PAPER_EDGE_ALPHA)
+                    ctx.set_line_width(1.0)
+                    ctx.rectangle(ox, oy, pw, ph)
+                    ctx.stroke()
             ctx.translate(ox, oy)
             ctx.scale(ed.zoom, ed.zoom)
             for it in ed.pending:
@@ -1206,7 +1337,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         # -- toolbar ------------------------------------------------------
 
         css = Gtk.CssProvider()
-        css.load_from_data(CSS)
+        _bg, _fg, _light = _theme_colors(win)
+        chrome["desk"] = _desk_rgb(_bg, _light)
+        chrome["fg"] = _fg
+        chrome["light"] = _light
+        chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
+        css.load_from_data(_editorial_css(_light))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -1272,6 +1408,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             _ink(ctx, ink, 1.4)
             _path(ctx, [(3.6, 14.4), (5.6, 12.4)])
             ctx.stroke()
+            ctx.set_source_rgba(*ink)
+            ctx.arc(5.6, 12.4, 2.0, 0, 2 * math.pi)
+            ctx.fill()
 
         def paint_highlighter(ctx, fg):
             _ink(ctx, fg, 1.5)
@@ -1287,8 +1426,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ctx.fill()
 
         def paint_text(ctx, fg):
-            _ink(ctx, fg, 1.9)
+            _ink(ctx, fg, 1.6)
             _path(ctx, [(4.5, 4.2), (13.5, 4.2)])
+            ctx.stroke()
+            _path(ctx, [(4.5, 4.2), (4.5, 5.2)])
+            ctx.stroke()
+            _path(ctx, [(13.5, 4.2), (13.5, 5.2)])
             ctx.stroke()
             _path(ctx, [(9, 4.2), (9, 14.6)])
             ctx.stroke()
@@ -1386,10 +1529,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 btn.set_group(first_btn)
             btn.connect("toggled", lambda b: b.get_active() and setattr(ed, "tool", name))
             tools[name] = btn
-            toolbar.append(btn)
             return btn
 
-        def tool_sep():
+        def rail_sep():
             sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
             toolbar.append(sep)
 
@@ -1398,12 +1540,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         side_toggle.add_css_class("tool-icon")
         side_toggle.set_child(icon_widget(paint_sidebar))
         side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
-        toolbar.append(side_toggle)
-        tool_sep()
 
         make_tool("select", "Select — click an item, drag to move (Esc deselects, Del removes)",
                   paint_pointer)
-        tool_sep()
         # Pen and its color share one button: the pen nib is drawn in the
         # current ink color; tapping the pen while it is ALREADY the active
         # tool opens the palette. One slot, no hover needed — touch-friendly.
@@ -1455,7 +1594,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         make_tool("highlight", "Highlighter — drag across a region", paint_highlighter)
         make_tool("text", "Text — click to type onto the page", paint_text)
         make_tool("note", "Sticky note — click to leave a comment", paint_note)
-        tool_sep()
         make_tool("sign", "Sign — click to place your signature", paint_sign)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
         make_tool("cross", "Cross-out stamp — places an ✕ on the page", paint_cross)
@@ -1515,7 +1653,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             "Crop page — drag the region to keep (CropBox; applies on Save)",
             paint_crop,
         )
-        tool_sep()
         redact_btn = make_tool(
             "redact",
             "Redact — drag over text (tap again for free-rectangle mode)",
@@ -1626,7 +1763,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             next_b.set_sensitive(ed.page_no < ed.page_count() - 1)
 
         save_btn = Gtk.Button(label="Save")
-        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("omapdf-ghost")
         undo_b = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         redo_b = Gtk.Button.new_from_icon_name("edit-redo-symbolic")
         undo_b.set_tooltip_text("Undo — steps back through edits AND saves (Ctrl+Z)")
@@ -1663,6 +1800,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         undo_b.connect("clicked", lambda _b: do_undo())
         redo_b.connect("clicked", lambda _b: do_redo())
         zoom_dot = Gtk.Label()
+        zoom_dot.add_css_class("zoom-indicator")
         zoom_btn = Gtk.MenuButton()
         zoom_btn.add_css_class("tool-slim")
         zoom_btn.set_child(zoom_dot)
@@ -1829,57 +1967,66 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         share_pop.set_child(share_box)
         share_btn.set_popover(share_pop)
 
-        tool_sep()
-        toolbar.append(search_btn)
-        toolbar.append(zoom_btn)
-        toolbar.append(undo_b)
-        toolbar.append(redo_b)
-        toolbar.append(nav)
-        tool_sep()
-        toolbar.append(ask_btn)
-        toolbar.append(share_btn)
-        toolbar.append(save_btn)
+        def refresh_save_style():
+            dirty = ed.pending or ed.page_preview.has_changes()
+            if dirty:
+                save_btn.remove_css_class("omapdf-ghost")
+                save_btn.add_css_class("omapdf-ink")
+            else:
+                save_btn.remove_css_class("omapdf-ink")
+                save_btn.add_css_class("omapdf-ghost")
 
+        save_style_hook["fn"] = refresh_save_style
+
+        for w in (side_toggle, search_btn):
+            toolbar.append(w)
+        rail_sep()
+        for w in (
+            tools["select"], pen_btn, tools["highlight"], tools["text"], tools["note"],
+            tools["sign"], tools["check"], tools["cross"], shape_btn, tools["crop"],
+            redact_btn,
+        ):
+            toolbar.append(w)
+        rail_sep()
+        for w in (zoom_btn, undo_b, redo_b):
+            toolbar.append(w)
+        toolbar.append(nav)
+        bottom_spacer = Gtk.Box()
+        bottom_spacer.set_vexpand(True)
+        toolbar.append(bottom_spacer)
+        for w in (ask_btn, share_btn, save_btn):
+            toolbar.append(w)
+
+        toolbar.set_vexpand(True)
         toolbar_wrap = Gtk.Box()
         toolbar_wrap.set_halign(Gtk.Align.END)
-        toolbar_wrap.set_valign(Gtk.Align.START)
+        toolbar_wrap.set_valign(Gtk.Align.FILL)
         toolbar_wrap.set_can_target(True)
         toolbar_wrap.append(toolbar)
 
         def celebrate_save():
-            # A little cheer: the Save button flips to success with a same-size 👍
-            # (no layout jiggle), while a bigger thumbs-up pops in an overlay
-            # floating just beneath it — small → big → settle — then fades.
             label = save_btn.get_child()
-            save_btn.add_css_class("success")
             save_btn.set_sensitive(False)
-            label.set_text("👍")
-            frames = [(0, "11000"), (90, "18000"), (200, "24000"),
-                      (330, "16000"), (450, "19000")]
-            for delay, size in frames:
-                GLib.timeout_add(
-                    delay,
-                    lambda s=size: (cheer_label.set_markup(f'<span size="{s}">👍</span>'), False)[1],
-                )
+            save_btn.remove_css_class("omapdf-ghost")
+            save_btn.remove_css_class("omapdf-ink")
+            label.set_text("Saved")
 
             def restore():
-                save_btn.remove_css_class("success")
                 save_btn.set_sensitive(True)
                 label.set_text("Save")
-                cheer_label.set_text("")
+                refresh_save_style()
                 return False
 
-            GLib.timeout_add(1400, restore)
+            GLib.timeout_add(1200, restore)
 
-        # Toast: a banner that slides down from the top, floats over the page
-        # (no layout jump), and dismisses itself after 5 seconds.
+        # Toast: bottom-centre ink strip; floats over the page without layout jump.
         toast_label = Gtk.Label()
         toast_label.add_css_class("toast-banner")
         toast_revealer = Gtk.Revealer()
-        toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         toast_revealer.set_transition_duration(220)
         toast_revealer.set_halign(Gtk.Align.CENTER)
-        toast_revealer.set_valign(Gtk.Align.START)
+        toast_revealer.set_valign(Gtk.Align.END)
         toast_state = {"timeout": 0}
         # Suppresses the disk watcher while omapdf itself writes the file.
         write_guard = {"until": 0}
@@ -2186,8 +2333,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         win.insert_action_group("page", sidebar_api["actions"])
         side_list = sidebar_api["widget"]
         side_scroll = Gtk.ScrolledWindow()
+        side_scroll.add_css_class("omapdf-thumb-rail")
         side_scroll.set_child(side_list)
-        side_scroll.set_size_request(150, -1)
+        side_scroll.set_size_request(132, -1)
         side_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         side_revealer = Gtk.Revealer()
         side_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
