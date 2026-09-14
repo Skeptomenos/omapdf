@@ -42,7 +42,7 @@ def build_page_sidebar(
     side_list.add_css_class("navigation-sidebar")
 
     def pages_doc() -> pymupdf.Document:
-        return ed.viewing_doc()
+        return ed.page_doc()
 
     def refresh_thumbs():
         nonlocal row_widgets

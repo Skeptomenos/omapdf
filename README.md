@@ -56,17 +56,28 @@ notes and highlights as normal comments.
 A native GTK4 editor, Preview-fast, designed for Omarchy but plain-GTK
 portable:
 
+- **Preview-like page sidebar** (F9): thumbnails with multi-select, drag
+  to reorder, delete/rotate shortcuts, context menu (extract, insert blank
+  or file), drop PDFs/images onto the sidebar, Shift+drag to export pages
+- **Two-window page copy**: Ctrl+C/V/X on selected thumbnails copies
+  `application/x-omapdf-pages` (plus a PDF clipboard fallback) — paste
+  between two editor windows like Preview
+- **True redact** (R): text-snap or free-rectangle modes; translucent ghosts
+  until Save; default writes `*_redacted.pdf` so the original stays. **Pen
+  and ink are not redact** — only the `redact` op removes content from
+  `get_text()` / `pdftotext`
+- **Form fields**: click an empty AcroForm widget, type, Save → `fill_field`
+  through the engine; select a saved annotation and Delete → `delete_annotation`
 - **Tools** (hand-drawn vector icon set): select/drag, pen with a
   tap-again color palette, highlighter, text, sticky notes, signature
-  placement, green-check and red-cross stamps
+  placement, green-check and red-cross stamps, redact
 - **Ghost model**: everything you place is a draggable, nudgeable pending
   item until Save bakes it through the op engine — and **undo crosses the
   save boundary**: Ctrl+Z after saving reverts the file and resurrects the
   saved items as editable ghosts
-- **Reading comforts**: thumbnail sidebar (F9), fit-width zoom that tracks
-  the live viewport, zoom presets + Ctrl+scroll, full-document search
-  (Ctrl+F) with match cycling, page navigation by Up/Down, PgUp/PgDn,
-  Home/End, Ctrl+G go-to-page
+- **Reading comforts**: fit-width zoom that tracks the live viewport, zoom
+  presets + Ctrl+scroll, full-document search (Ctrl+F) with match cycling,
+  page navigation by Up/Down, PgUp/PgDn, Home/End, Ctrl+G go-to-page
 - **Comments open on click**: click any saved annotation to read its text —
   including comments left by agents or by other people's PDF apps
 - **Agent proposals as ghosts**: `omapdf edit doc.pdf --ops proposal.json`
@@ -95,6 +106,17 @@ omapdf note doc.pdf --page 2 --at 400,300 --text "negotiate this"
 omapdf fill form.pdf --field tenant_name "Peter Bergin" --field rent "1800"
 omapdf apply doc.pdf --ops edits.json        # atomic batch of ops
 
+omapdf pages doc.pdf --list                  # page list (JSON)
+omapdf pages doc.pdf --delete 2,4 -o out.pdf
+omapdf pages doc.pdf --rotate 90 --pages 1 -o out.pdf
+omapdf pages doc.pdf --move 5-6 --after 1 -o out.pdf
+omapdf pages doc.pdf --insert other.pdf --after 2 -o out.pdf
+omapdf pages doc.pdf --extract 2-3 -o excerpt.pdf
+
+omapdf redact doc.pdf --page 1 --match "SSN" -o redacted.pdf
+omapdf redact doc.pdf --page 1 --rect 72,400,300,430 -o redacted.pdf
+omapdf delete-annotation doc.pdf --page 1 --index 0 -o out.pdf
+
 omapdf sig draw                      # draw your signature once (GTK window)
 omapdf sig add ~/sig.png --name work # …or import an image
 omapdf sign doc.pdf --page 4 --at 120,540 --date -o signed.pdf
@@ -115,7 +137,9 @@ claude mcp add omapdf -- omapdf-mcp
 
 MCP tools: `read_pdf`, `list_form_fields`, `apply_ops`, `highlight`,
 `add_note`, `fill_field`, `place_signature` (dry-run by default —
-confirm-before-ink), `list_signatures`, `flatten_pdf`.
+confirm-before-ink), `list_signatures`, `list_pages`, `delete_pages`,
+`rotate_pages`, `move_pages`, `insert_pages`, `extract_pages`, `redact`
+and `delete_annotation` (dry-run by default), `flatten_pdf`.
 
 The Claude Code **skill** in [`skill/`](skill/) is a full PDF-assistant
 playbook: recipes for review-and-highlight, form filling, signing,
@@ -161,12 +185,13 @@ xdg-mime default omapdf.desktop application/pdf
 
 ## Status & roadmap
 
-Working today: op engine, CLI, MCP server + skill, signature store and
-drawing window, the full editor, bar widget, agent ask/watch loop, tests.
+**Preview parity shipped:** page sidebar surgery, two-window page clipboard,
+true redaction, GUI form fill, and annotation delete — on CLI, MCP, and the
+GTK editor. Human checklist: [docs/preview-parity.md](docs/preview-parity.md).
+
 See [docs/roadmap.md](docs/roadmap.md) for what's next — headlines:
-signature-line auto-detection (`sign --auto`), annotation deletion/editing
-of saved items, comments summary page, cryptographic (PAdES) signing via
-pyHanko.
+`sign --auto`, comments summary page, stamp library, cryptographic (PAdES)
+signing via pyHanko. P2 backlog: shapes, crop, password on save-as.
 
 ## License
 

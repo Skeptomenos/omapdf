@@ -41,6 +41,12 @@ def _gtk_main(out_path: str) -> int:
     import gi
 
     gi.require_version("Gtk", "4.0")
+    try:
+        gi.require_foreign("cairo")
+    except (ImportError, ValueError) as exc:
+        raise SystemExit(
+            "omapdf sig draw needs PyGObject cairo integration — install python3-gi-cairo."
+        ) from exc
     import cairo
     from gi.repository import Gtk
 
