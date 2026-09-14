@@ -24,6 +24,13 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
+try:
+    gi.require_foreign("cairo")
+except (ImportError, ValueError) as exc:
+    raise SystemExit(
+        "omapdf edit needs PyGObject cairo integration — install python3-gi-cairo "
+        "(Debian/Ubuntu) or ensure python-gobject is built with cairo support."
+    ) from exc
 import cairo
 import pymupdf
 from gi.repository import Gdk, Gio, GLib, Gtk
@@ -2087,8 +2094,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         if ed.page_count() > 1:
             side_toggle.set_active(True)
 
+        def log_layout_sizes(_src=None, _pspec=None):
+            header_w = header.get_width() or header.get_allocated_width()
+            scroll_w = scroller.get_width() or scroller.get_allocated_width()
+            area_w = area.get_width() or area.get_allocated_width()
+            area_h = area.get_height() or area.get_allocated_height()
+            surf = ed.page_surface
+            surf_sz = (
+                (surf.get_width(), surf.get_height()) if surf is not None else None
+            )
+            print(
+                f"omapdf layout: header={header_w} scroller={scroll_w} "
+                f"drawing_area={area_w}x{area_h} page_surface={surf_sz} zoom={ed.zoom:.3f}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return False
+
         def initial_render():
             render_page()
+            log_layout_sizes()
             if ed.pending:
                 toast(
                     f"{len(ed.pending)} proposed change(s) loaded — "
