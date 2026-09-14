@@ -55,11 +55,15 @@ from .view_gestures import (
     page_y_at_focus,
     pinch_live_pct,
     pinch_pixmap_scale,
-    popover_can_popup,
-    popover_is_alive,
     resize_signature_keep_aspect,
     scroll_to_keep_focus,
     signature_ghost,
+)
+from .popover_safe import (
+    popover_busy,
+    popover_try_popdown,
+    popover_try_popup,
+    popover_try_set_autohide,
 )
 from .rail_icons import paint_redo as paint_redo_glyph
 from .rail_icons import paint_undo as paint_undo_glyph
@@ -968,7 +972,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def render_page(*, v_anchor: dict | None = None):
             # Resizing the drawing area during a live signature-popover drag
             # can unrealize the popover; GTK then SIGSEGVs on set_autohide.
-            if sig_drag.get("active"):
+            if sig_drag.get("active") or popover_busy():
                 pinch_state["deferred_render"] = True
                 if v_anchor is not None:
                     pinch_state["deferred_anchor"] = v_anchor
@@ -1261,7 +1265,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             def commit(_e):
                 text = entry.get_text().strip()
-                pop.popdown()
+                popover_try_popdown(pop)
                 if text:
                     ed.checkpoint()
                     item = on_text(text)
@@ -1272,7 +1276,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     refresh_title()
 
             entry.connect("activate", commit)
-            pop.popup()
+            GLib.idle_add(lambda: (popover_try_popup(pop), False)[1])
             entry.grab_focus()
 
         def prompt_text(px, py):
@@ -1363,7 +1367,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             pop.set_child(vbox)
             # Defer past the in-flight click gesture: popping up during the
             # press can get the popover dismissed by its own click's release.
-            GLib.idle_add(lambda: (pop.popup(), False)[1])
+            GLib.idle_add(lambda: (popover_try_popup(pop), False)[1])
             return True
 
         # -- input --------------------------------------------------------
@@ -1948,7 +1952,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             def pick(_b, chosen=rgb_t):
                 ed.pen_color = chosen
                 show_pen_color()
-                color_pop.popdown()
+                popover_try_popdown(color_pop)
                 set_tool("pen")
 
             cb.connect("clicked", pick)
@@ -1968,7 +1972,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if pen_state["just_activated"]:
                 pen_state["just_activated"] = False
             elif ed.tool == "pen":
-                color_pop.popup()
+                popover_try_popup(color_pop)
 
         pen_btn.connect("clicked", on_pen_clicked)
 
@@ -1983,40 +1987,13 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         sign_pop = Gtk.Popover()
         sign_pop.set_parent(sign_btn)
         sign_pop.set_position(Gtk.PositionType.LEFT)
-        sign_pop.set_autohide(True)
+        popover_try_set_autohide(sign_pop, True)
         sign_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         sign_box.set_margin_top(10)
         sign_box.set_margin_bottom(10)
         sign_box.set_margin_start(10)
         sign_box.set_margin_end(10)
         sign_pop.set_child(sign_box)
-
-        def _sign_pop_alive() -> bool:
-            return popover_is_alive(sign_pop)
-
-        def _sign_pop_set_autohide(value: bool) -> None:
-            if not _sign_pop_alive():
-                return
-            try:
-                sign_pop.set_autohide(value)
-            except Exception:
-                return
-
-        def _sign_pop_popdown() -> None:
-            if not _sign_pop_alive():
-                return
-            try:
-                sign_pop.popdown()
-            except Exception:
-                return
-
-        def _sign_pop_popup() -> None:
-            if not popover_can_popup(sign_pop):
-                return
-            try:
-                sign_pop.popup()
-            except Exception:
-                return
 
         def _flush_deferred_render() -> None:
             if pinch_state["pending_commit"]:
@@ -2111,9 +2088,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     sig_move = Gtk.GestureDrag()
 
                     def on_sig_drag_begin(_g, _x, _y, n=name):
+                        # Do not toggle autohide here: gtk_popover_set_autohide
+                        # unrealizes, and a realized-but-nativeless popover
+                        # then SIGSEGVs. Keep the gallery mapped; place on
+                        # click or idle drop instead.
                         sig_drag["active"] = True
                         sig_drag["dragging"] = False
-                        _sign_pop_set_autohide(False)
                         ed.sig_name = n
                         set_tool("sign")
 
@@ -2125,7 +2105,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                         dragging = sig_drag["dragging"] and math.hypot(dx, dy) > 8
                         sig_drag["active"] = False
                         sig_drag["dragging"] = False
-                        _sign_pop_set_autohide(True)
 
                         def finish():
                             if dragging:
@@ -2144,7 +2123,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                                             return False
 
                                         GLib.timeout_add(80, clear_drop_flag)
-                            _sign_pop_popdown()
+                            popover_try_popdown(sign_pop)
                             _flush_deferred_render()
                             return False
 
@@ -2170,7 +2149,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             rec.add_css_class("suggested-action")
 
             def on_record(_b):
-                _sign_pop_popdown()
+                popover_try_popdown(sign_pop)
                 record_signature(next_sig_name())
 
             rec.connect("clicked", on_record)
@@ -2179,7 +2158,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 rer = Gtk.Button(label=f"Re-record '{ed.sig_name}'")
 
                 def on_rerecord(_b, n=ed.sig_name):
-                    _sign_pop_popdown()
+                    popover_try_popdown(sign_pop)
                     record_signature(n)
 
                 rer.connect("clicked", on_rerecord)
@@ -2205,7 +2184,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             rebuild_sign_popover()
             # Defer past this click: popup() during the press is dismissed by
             # autohide on the same release (same pattern as saved-annot pops).
-            GLib.idle_add(lambda: (_sign_pop_popup(), False)[1])
+            GLib.idle_add(lambda: (popover_try_popup(sign_pop), False)[1])
 
         sign_btn.connect("clicked", on_sign_clicked)
         make_tool("check", "Checkmark stamp — places a ✓ on the page", paint_check)
@@ -2235,7 +2214,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             def pick_shape(_b, chosen=kind):
                 ed.shape_kind = chosen
-                shape_pop.popdown()
+                popover_try_popdown(shape_pop)
                 set_tool("shape")
 
             sb.connect("clicked", pick_shape)
@@ -2258,7 +2237,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if shape_state["just_activated"]:
                 shape_state["just_activated"] = False
             elif ed.tool == "shape":
-                shape_pop.popup()
+                popover_try_popup(shape_pop)
 
         shape_btn.connect("clicked", on_shape_clicked)
         make_tool(
@@ -2305,7 +2284,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             if redact_state["just_activated"]:
                 redact_state["just_activated"] = False
             elif ed.tool == "redact":
-                redact_pop.popup()
+                popover_try_popup(redact_pop)
 
         redact_btn.connect("clicked", on_redact_clicked)
         tools["select"].set_active(True)
@@ -2356,7 +2335,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 n = int(goto_entry.get_text().strip())
             except ValueError:
                 return
-            goto_pop.popdown()
+            popover_try_popdown(goto_pop)
             goto_entry.set_text("")
             goto_page(n - 1)
 
@@ -2432,7 +2411,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def set_zoom(pct):
             anchor = capture_v_anchor()
             ed.zoom_pct = pct
-            zoom_pop.popdown()
+            popover_try_popdown(zoom_pop)
             render_page(v_anchor=anchor)
 
         for zlabel, zval in [("Fit page", None), ("50%", 50.0), ("75%", 75.0),
@@ -2489,7 +2468,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             import subprocess as sp
 
             question = ask_entry.get_text().strip() or "Review this document for me."
-            ask_pop.popdown()
+            popover_try_popdown(ask_pop)
             ask_entry.set_text("")
             prompt = (
                 f"{question}\n\nThe document is the PDF at \"{ed.path}\" — "
@@ -2534,7 +2513,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def share_action(fn):
             def go(_b):
-                share_pop.popdown()
+                popover_try_popdown(share_pop)
                 path = share_target()
                 if path:
                     try:
@@ -2890,7 +2869,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif keyval == Gdk.KEY_r and not ctrl:
                 set_tool("redact")
             elif ctrl and keyval == Gdk.KEY_g:
-                page_btn.popup()
+                popover_try_popup(page_btn)
             elif keyval == Gdk.KEY_Page_Up:
                 go(-1)
             elif keyval == Gdk.KEY_Page_Down:
@@ -3052,7 +3031,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             return compute_pinch_focus(gesture, scroller, area)
 
         def on_pinch_begin(gesture, _seq):
-            if sig_drag["active"]:
+            if sig_drag["active"] or popover_busy():
                 return
             if pinch_state["commit_id"]:
                 GLib.source_remove(pinch_state["commit_id"])
@@ -3096,7 +3075,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def commit_pinch_zoom():
             pinch_state["commit_id"] = 0
-            if sig_drag["active"]:
+            if sig_drag["active"] or popover_busy():
                 pinch_state["pending_commit"] = True
                 return False
             live = pinch_state["live_pct"]

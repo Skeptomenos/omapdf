@@ -274,6 +274,9 @@ class _AlivePopover:
     def get_realized(self):
         return True
 
+    def get_surface(self):
+        return object()
+
 
 class _UnrealizedPopover:
     __gpointer__ = "0xabc"
@@ -284,6 +287,9 @@ class _UnrealizedPopover:
     def get_realized(self):
         return False
 
+    def get_surface(self):
+        return None
+
 
 class _OrphanPopover:
     __gpointer__ = "0xabc"
@@ -293,6 +299,27 @@ class _OrphanPopover:
 
     def get_realized(self):
         return True
+
+    def get_surface(self):
+        return object()
+
+
+class _RealizedDeadSurfacePopover:
+    """GTK 4.22: realized, get_native() is self, but no GdkSurface."""
+
+    __gpointer__ = "0xabc"
+
+    def get_parent(self):
+        return object()
+
+    def get_realized(self):
+        return True
+
+    def get_native(self):
+        return self
+
+    def get_surface(self):
+        return None
 
 
 def test_popover_is_alive_skips_null_pointer_without_gtk_calls():
@@ -306,7 +333,33 @@ def test_popover_is_alive_skips_null_pointer_without_gtk_calls():
     assert popover_can_popup(None) is False
     assert popover_can_popup(_AlivePopover()) is True
     assert popover_can_popup(_UnrealizedPopover()) is True
-    assert popover_can_popup(_OrphanPopover()) is False
+    from omepreview.view_gestures import popover_allows
+
+    assert popover_is_alive(_RealizedDeadSurfacePopover()) is False
+    assert popover_can_popup(_RealizedDeadSurfacePopover()) is False
+    assert popover_allows(_RealizedDeadSurfacePopover(), "autohide") is False
+    assert popover_allows(_AlivePopover(), "autohide") is True
+    assert popover_allows(_UnrealizedPopover(), "autohide") is False
+
+
+class _NoSurfaceAccessor:
+    """Older GIR / unit double: skip the surface clause."""
+
+    __gpointer__ = "0xabc"
+
+    def get_parent(self):
+        return object()
+
+    def get_realized(self):
+        return True
+
+
+def test_popover_skips_surface_clause_when_accessor_missing():
+    from omepreview.view_gestures import popover_allows
+
+    assert popover_is_alive(_NoSurfaceAccessor()) is True
+    assert popover_can_popup(_NoSurfaceAccessor()) is True
+    assert popover_allows(_NoSurfaceAccessor(), "autohide") is True
 
 
 def test_pinch_begin_sets_state_after_focus():
@@ -317,23 +370,26 @@ def test_pinch_begin_sets_state_after_focus():
     assert "compute_pinch_focus" in focus
     assert "tok, ax, ay = mapped" not in text
     assert begin.index("_pinch_focus") < begin.index('pinch_state["start_pct"]')
-    assert 'if sig_drag["active"]:' in begin
+    assert 'if sig_drag["active"] or popover_busy():' in begin
 
 
-def test_sign_pop_autohide_and_popdown_are_guarded():
+def test_sign_pop_never_toggles_autohide_while_mapped():
     src = Path(__file__).resolve().parents[1] / "src" / "omepreview" / "gui.py"
     text = src.read_text(encoding="utf-8")
     start = text.index("def rebuild_sign_popover():")
     end = text.index("def on_sign_clicked")
     body = text[start:end]
-    assert "sign_pop.set_autohide(False)" not in body
-    assert "sign_pop.set_autohide(True)" not in body
+    assert "sign_pop.set_autohide(" not in body
     assert "sign_pop.popdown()" not in body
-    assert "_sign_pop_set_autohide(False)" in body
-    assert "_sign_pop_set_autohide(True)" in body
-    assert "_sign_pop_popdown()" in body
-    assert "popover_is_alive" in text
-    assert "if not _sign_pop_alive():" in text
+    assert "_sign_pop_set_autohide" not in text
+    assert "_sign_pop_popdown" not in text
+    assert "popover_try_popdown(sign_pop)" in body
+    begin = text[text.index("def on_sig_drag_begin") : text.index("def on_sig_drag_update")]
+    assert "popover_try_set_autohide" not in begin
+    assert 'sig_drag["active"] = True' in begin
+    assert "popover_try_set_autohide(sign_pop, True)" in text
+    construct = text[text.index("sign_pop = Gtk.Popover()") : text.index("def rebuild_sign_popover")]
+    assert "popover_try_set_autohide(sign_pop, True)" in construct
 
 
 def test_render_page_skips_overlay_resize_during_sig_drag():
@@ -343,4 +399,5 @@ def test_render_page_skips_overlay_resize_during_sig_drag():
     end = text.index("# -- drawing")
     body = text[start:end]
     assert 'if sig_drag.get("active")' in body
+    assert "popover_busy()" in body
     assert 'pinch_state["deferred_render"]' in body

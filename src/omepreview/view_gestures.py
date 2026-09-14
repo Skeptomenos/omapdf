@@ -184,40 +184,91 @@ def gi_pointer_ok(widget) -> bool:
     return addr != 0
 
 
-def popover_is_alive(widget) -> bool:
-    """True when a popover is safe to ``set_autohide`` / ``popdown``.
+def popover_native_surface(widget) -> tuple[object | None, object | None]:
+    """``(native, surface)`` via GTK accessors if they exist.
 
-    Requires a non-NULL GI pointer, a parent, and ``get_realized()`` when
-    that method exists. Any GTK call is skipped when the pointer is NULL —
-    ``get_realized()`` itself can SEGV on a NULL instance.
+    Gtk.Popover is itself a Gtk.Native, so ``get_native()`` can return the
+    popover even when it has no GdkSurface. Missing accessors return None
+    (skip that clause) rather than guessing names.
     """
+    native = None
+    surface = None
+    get_native = getattr(widget, "get_native", None)
+    if callable(get_native):
+        try:
+            native = get_native()
+        except Exception:
+            native = None
+    get_surface = getattr(widget, "get_surface", None)
+    if callable(get_surface):
+        try:
+            surface = get_surface()
+        except Exception:
+            surface = None
+    if surface is None and native is not None:
+        ns = getattr(native, "get_surface", None)
+        if callable(ns):
+            try:
+                surface = ns()
+            except Exception:
+                surface = None
+    return native, surface
+
+
+def popover_allows(widget, action: str) -> bool:
+    """Whether ``popup`` / ``popdown`` / ``autohide`` is safe on *widget*.
+
+    ``popup`` needs a non-NULL pointer and a parent. If already realized,
+    it also needs a GdkSurface (realized-but-nativeless is the SEGV state).
+
+    ``popdown`` and ``autohide`` need parent + realized + a live GdkSurface.
+    ``gtk_popover_set_autohide`` unrealizes; without a surface that
+    dereference is SEGV_MAPERR. Check-then-act still races — callers must
+    not toggle autohide on a mapped popover.
+    """
+    if action not in {"popup", "popdown", "autohide"}:
+        raise ValueError(f"unknown popover action {action!r}")
     if not gi_pointer_ok(widget):
         return False
     try:
         if widget.get_parent() is None:
             return False
-        realized = getattr(widget, "get_realized", None)
-        if not callable(realized):
-            return True
-        return bool(realized())
     except Exception:
         return False
+    realized = None
+    get_realized = getattr(widget, "get_realized", None)
+    if callable(get_realized):
+        try:
+            realized = bool(get_realized())
+        except Exception:
+            return False
+    native, surface = popover_native_surface(widget)
+    # Skip the surface clause when no accessor exists (fakes / older GIR).
+    # On GTK 4.22 Popover is Native, so get_native() returns self even
+    # with no GdkSurface — surface is the real liveness check.
+    has_surface_accessor = callable(getattr(widget, "get_surface", None)) or (
+        native is not None and callable(getattr(native, "get_surface", None))
+    )
+    surface_dead = has_surface_accessor and surface is None
+    if action == "popup":
+        if realized is True and surface_dead:
+            return False
+        return True
+    if realized is False:
+        return False
+    if surface_dead:
+        return False
+    return True
+
+
+def popover_is_alive(widget) -> bool:
+    """True when a popover is safe to ``popdown`` / ``set_autohide``."""
+    return popover_allows(widget, "popdown")
 
 
 def popover_can_popup(widget) -> bool:
-    """True when ``popup()`` is safe: non-NULL pointer and a parent.
-
-    Unlike ``popover_is_alive``, this does **not** require ``get_realized()``.
-    A Sign popover is unrealized until the first ``popup()``; requiring
-    realized made the Sign tool arm click-to-place without opening the
-    gallery.
-    """
-    if not gi_pointer_ok(widget):
-        return False
-    try:
-        return widget.get_parent() is not None
-    except Exception:
-        return False
+    """True when ``popup()`` is safe: parented, and not realized-without-surface."""
+    return popover_allows(widget, "popup")
 
 
 def delete_selected_ghost(pending: list, selected: dict | None) -> dict | None:
