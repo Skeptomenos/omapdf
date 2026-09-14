@@ -119,6 +119,174 @@ def _apply_ink(doc, op) -> dict:
     return {"rect": list(annot.rect)}
 
 
+def _validate_page_indices(doc: pymupdf.Document, pages: list[int], label: str = "page") -> None:
+    for p in pages:
+        if p < 1 or p > doc.page_count:
+            raise OpError(
+                f"{label} {p} out of range (document has {doc.page_count} pages)"
+            )
+
+
+def _normalize_rotation(degrees: int) -> int:
+    return degrees % 360 if degrees >= 0 else (360 + degrees) % 360
+
+
+def _apply_rotate_pages(doc, op) -> dict:
+    pages = op["pages"]
+    _validate_page_indices(doc, pages)
+    delta = _normalize_rotation(op["degrees"])
+    for p in pages:
+        page = doc[p - 1]
+        page.set_rotation((page.rotation + delta) % 360)
+    return {"pages": pages, "degrees": op["degrees"]}
+
+
+def _apply_delete_pages(doc, op) -> dict:
+    pages = sorted(set(op["pages"]), reverse=True)
+    _validate_page_indices(doc, pages)
+    for p in pages:
+        doc.delete_page(p - 1)
+    return {"pages": op["pages"]}
+
+
+def _apply_move_pages(doc, op) -> dict:
+    pages_to_move = op["pages"]
+    after = op["after"]
+    n = doc.page_count
+    _validate_page_indices(doc, pages_to_move)
+    if after != 0 and (after < 1 or after > n):
+        raise OpError(f"after {after} out of range (document has {n} pages)")
+    move_set = set(pages_to_move)
+    if len(move_set) != len(pages_to_move):
+        raise OpError("move_pages pages must be unique")
+    remaining = [p for p in range(1, n + 1) if p not in move_set]
+    if after == 0:
+        new_order = list(pages_to_move) + remaining
+    else:
+        if after not in remaining:
+            raise OpError(f"after page {after} is among the pages being moved")
+        insert_at = remaining.index(after) + 1
+        new_order = remaining[:insert_at] + list(pages_to_move) + remaining[insert_at:]
+    doc.select([p - 1 for p in new_order])
+    return {"pages": pages_to_move, "after": after}
+
+
+def _insert_count(op: dict) -> int:
+    if "blank" in op:
+        return op["blank"]["count"]
+    if "image" in op:
+        return 1
+    src = Path(op["source"])
+    if not src.is_file():
+        raise FileNotFoundError(f"no such PDF: {src}")
+    src_doc = pymupdf.open(str(src))
+    try:
+        if op.get("source_pages"):
+            _validate_page_indices(src_doc, op["source_pages"], "source page")
+            return len(op["source_pages"])
+        return src_doc.page_count
+    finally:
+        src_doc.close()
+
+
+def _apply_insert_pages(doc, op) -> dict:
+    after = op["after"]
+    if after > doc.page_count:
+        raise OpError(
+            f"after {after} out of range (document has {doc.page_count} pages)"
+        )
+    start_at = after  # 0-based insertion index
+
+    if "blank" in op:
+        blank = op["blank"]
+        inserted = 0
+        for i in range(blank["count"]):
+            doc.new_page(
+                pno=start_at + i,
+                width=blank["width"],
+                height=blank["height"],
+            )
+            inserted += 1
+        return {"after": after, "inserted": inserted, "blank": blank}
+
+    if "image" in op:
+        image = Path(op["image"])
+        if not image.is_file():
+            raise FileNotFoundError(f"no such image: {image}")
+        pix = pymupdf.Pixmap(str(image))
+        if pix.width == 0 or pix.height == 0:
+            raise OpError(f"image {image} is empty")
+        if after >= 1:
+            ref = doc[after - 1]
+            width, height = ref.rect.width, ref.rect.height
+        else:
+            width, height = float(pix.width), float(pix.height)
+        page = doc.new_page(pno=start_at, width=width, height=height)
+        page.insert_image(page.rect, filename=str(image), keep_proportion=True)
+        return {"after": after, "inserted": 1, "image": str(image)}
+
+    source = Path(op["source"])
+    if not source.is_file():
+        raise FileNotFoundError(f"no such PDF: {source}")
+    src_doc = pymupdf.open(str(source))
+    try:
+        if src_doc.needs_pass:
+            raise OpError(f"{source} is password-protected; decrypt it first")
+        source_pages = op.get("source_pages") or list(range(1, src_doc.page_count + 1))
+        _validate_page_indices(src_doc, source_pages, "source page")
+        for i, sp in enumerate(source_pages):
+            doc.insert_pdf(
+                src_doc,
+                from_page=sp - 1,
+                to_page=sp - 1,
+                start_at=start_at + i,
+            )
+        return {
+            "after": after,
+            "inserted": len(source_pages),
+            "source": str(source),
+            "source_pages": source_pages,
+        }
+    finally:
+        src_doc.close()
+
+
+def _apply_extract_pages(doc, op, *, dry_run: bool) -> dict:
+    pages = op["pages"]
+    _validate_page_indices(doc, pages)
+    dest = Path(op["to"])
+    if dry_run:
+        return {"pages": pages, "to": str(dest)}
+    out_doc = pymupdf.open()
+    try:
+        for p in pages:
+            out_doc.insert_pdf(doc, from_page=p - 1, to_page=p - 1)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        out_doc.save(str(dest), garbage=3, deflate=True)
+    finally:
+        out_doc.close()
+    return {"pages": pages, "to": str(dest)}
+
+
+def _project_page_count(doc: pymupdf.Document, ops: list[dict]) -> int:
+    count = doc.page_count
+    for op in ops:
+        kind = op["op"]
+        if kind == "delete_pages":
+            count -= len(set(op["pages"]))
+        elif kind == "insert_pages":
+            count += _insert_count(op)
+    return count
+
+
+def _ensure_pages_remain(doc: pymupdf.Document, ops: list[dict]) -> None:
+    if _project_page_count(doc, ops) < 1:
+        raise OpError(
+            "cannot delete every page; the document must keep at least one page "
+            "(use insert_pages in the same batch to replace removed pages)"
+        )
+
+
 _APPLIERS = {
     "highlight": _apply_highlight,
     "note": _apply_note,
@@ -126,6 +294,10 @@ _APPLIERS = {
     "fill_field": _apply_fill_field,
     "place_signature": _apply_place_signature,
     "ink": _apply_ink,
+    "rotate_pages": _apply_rotate_pages,
+    "delete_pages": _apply_delete_pages,
+    "move_pages": _apply_move_pages,
+    "insert_pages": _apply_insert_pages,
 }
 
 
@@ -169,9 +341,13 @@ def apply(
     try:
         if doc.needs_pass:
             raise OpError(f"{pdf} is password-protected; decrypt it first")
+        _ensure_pages_remain(doc, validated)
         applied = []
         for op in validated:
-            resolution = _APPLIERS[op["op"]](doc, op)
+            if op["op"] == "extract_pages":
+                resolution = _apply_extract_pages(doc, op, dry_run=dry_run)
+            else:
+                resolution = _APPLIERS[op["op"]](doc, op)
             applied.append({**op, **resolution, "applied": not dry_run})
         if dry_run:
             doc.close()

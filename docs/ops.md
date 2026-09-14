@@ -71,6 +71,46 @@ Freehand strokes as a real Ink annotation. `strokes` is a list of polylines
 `width` in points (default 2). Powers the editor's pen and its ✓/✕ stamps.
 Report adds the bounding `rect`.
 
+### rotate_pages
+```json
+{"op": "rotate_pages", "pages": [2, 3], "degrees": 90}
+```
+Rotates page objects (not a visual overlay). `degrees` ∈ {90, 180, 270, -90}.
+Report: `{ "pages": [...], "degrees": 90 }`.
+
+### delete_pages
+```json
+{"op": "delete_pages", "pages": [1, 4, 9]}
+```
+1-based page numbers. After apply, later pages compact. Deletes are applied
+high-to-low. Refuses to delete every page unless `insert_pages` in the same
+batch keeps the net count ≥ 1. Report: `{ "pages": [...] }`.
+
+### move_pages
+```json
+{"op": "move_pages", "pages": [5, 6], "after": 1}
+```
+Reorder pages. `after`: 0 = beginning; N = after current page N. Report:
+`{ "pages": [...], "after": 1 }`.
+
+### insert_pages
+```json
+{"op": "insert_pages", "after": 2, "source": "other.pdf", "source_pages": [1, 2, 3]}
+{"op": "insert_pages", "after": 0, "blank": {"count": 1, "width": 595, "height": 842}}
+{"op": "insert_pages", "after": 1, "image": "scan.png"}
+```
+Exactly one of `source`, `blank`, or `image`. `source_pages` defaults to all
+pages in the source PDF. Blank pages default to A4 (595×842 pt). Image pages
+are sized to the previous page when `after` ≥ 1, otherwise to the image
+pixels. Report includes `inserted` and which variant was used.
+
+### extract_pages
+```json
+{"op": "extract_pages", "pages": [2, 3], "to": "excerpt.pdf"}
+```
+Writes selected pages to `to`. Does not modify the source document. Report:
+`{ "pages": [...], "to": "excerpt.pdf" }`.
+
 ## Extending
 
 New op = one schema clause in `ops.py` + one applier in `engine.py` + a spec
