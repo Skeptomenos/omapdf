@@ -168,11 +168,17 @@ class Editor:
             self._view_doc = self.page_preview.open_view()
         return self._view_doc
 
+    def page_doc(self) -> pymupdf.Document:
+        """Scratch PDF when page ops are pending; otherwise the live file handle."""
+        if self.page_preview.has_changes():
+            return self.viewing_doc()
+        return self.doc
+
     def page(self) -> pymupdf.Page:
-        return self.viewing_doc()[self.page_no]
+        return self.page_doc()[self.page_no]
 
     def page_count(self) -> int:
-        return self.viewing_doc().page_count
+        return self.page_doc().page_count
 
     def checkpoint(self):
         self.undo_stack.append({
@@ -472,24 +478,36 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             dot = " •" if dirty else ""
             win.set_title(f"{Path(ed.path).name}{dot} — omapdf")
 
-        def fit_width_zoom():
-            # The real viewport width: hadjustment page-size accounts for the
-            # sidebar and window size; fall back before first allocation.
-            avail = scroller.get_hadjustment().get_page_size()
-            if avail < 100:
-                avail = scroller.get_width()
-            if avail < 100:
-                avail = 900
-            return (avail - 4) / ed.page().rect.width
+        def viewport_width() -> float:
+            # Prefer the scroller's allocated width — hadjustment page-size can
+            # report the content width or 0 before the first layout pass.
+            avail = float(scroller.get_width() or 0)
+            if avail < 50:
+                avail = float(scroller.get_allocated_width())
+            if avail < 50:
+                avail = float(scroller.get_hadjustment().get_page_size())
+            if avail < 50:
+                avail = 900.0
+            return avail
+
+        def fit_width_zoom() -> float:
+            page = ed.page()
+            width = page.rect.width or 595.0
+            z = (viewport_width() - 4.0) / width
+            return max(0.05, z)
 
         def render_page():
             if ed.zoom_pct is None:
                 z = fit_width_zoom()
             else:
-                z = ed.zoom_pct / 100 * (96 / 72)
+                z = max(0.05, ed.zoom_pct / 100 * (96 / 72))
             ed.zoom = z
             zoom_dot.set_text("Fit" if ed.zoom_pct is None else f"{int(ed.zoom_pct)}%")
-            pix = ed.page().get_pixmap(matrix=pymupdf.Matrix(z, z))
+            page = ed.page()
+            matrix = pymupdf.Matrix(z, z).prerotate(page.rotation)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            if pix.width < 1 or pix.height < 1:
+                return
             ed.page_surface = cairo.ImageSurface.create_from_png(
                 io.BytesIO(pix.tobytes("png"))
             )
@@ -504,6 +522,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         # -- drawing ------------------------------------------------------
 
         def draw(_a, ctx, _w, _h):
+            ctx.save()
             if ed.page_surface:
                 ctx.set_source_surface(ed.page_surface, 0, 0)
                 ctx.paint()
@@ -547,6 +566,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ctx.set_line_width(1.4)
                     ctx.rectangle(rect.x0 - 1, rect.y0 - 1, rect.width + 2, rect.height + 2)
                     ctx.stroke()
+            ctx.restore()
 
         def draw_item(ctx, it):
             if it["kind"] == "sig":
@@ -1862,6 +1882,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         scroller.set_child(area)
         scroller.set_vexpand(True)
         scroller.set_hexpand(True)
+        scroller.set_hexpand_set(True)
 
         # -- thumbnails sidebar -------------------------------------------
 
@@ -1890,6 +1911,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         side_revealer = Gtk.Revealer()
         side_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
         side_revealer.set_child(side_scroll)
+        side_revealer.set_hexpand(False)
+        side_revealer.set_vexpand(True)
+        side_revealer.set_halign(Gtk.Align.START)
         side_toggle.connect("toggled", lambda b: side_revealer.set_reveal_child(b.get_active()))
 
         # -- search -------------------------------------------------------
@@ -1990,7 +2014,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         scroller.get_hadjustment().connect("notify::page-size", on_viewport_change)
 
+        def on_scroller_width(_widget, _pspec):
+            if scroller.get_width() < 50:
+                return
+            if ed.page_surface is None or ed.page_surface.get_width() < 8:
+                GLib.idle_add(lambda: (render_page(), False)[1])
+            elif ed.zoom_pct is None:
+                on_viewport_change(scroller.get_hadjustment(), None)
+
+        scroller.connect("notify::width", on_scroller_width)
+
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        content.set_hexpand(True)
+        content.set_vexpand(True)
         content.append(side_revealer)
         content.append(scroller)
         toast_revealer.set_child(toast_label)
@@ -2002,9 +2038,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         cheer_label.set_can_target(False)
         overlay = Gtk.Overlay()
         overlay.set_child(content)
+        overlay.set_vexpand(True)
+        overlay.set_hexpand(True)
         overlay.add_overlay(toast_revealer)
         overlay.add_overlay(cheer_label)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_vexpand(True)
         box.append(search_bar)
         box.append(overlay)
         win.set_child(box)
@@ -2029,6 +2068,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ed.doc = pymupdf.open(ed.path)
                 except Exception:
                     return False
+                ed.invalidate_view()
                 ed.page_no = min(ed.page_no, ed.page_count() - 1)
                 ed.page_preview.clear()
                 render_page()
@@ -2046,10 +2086,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         sidebar_api["refresh"]()
         if ed.page_count() > 1:
             side_toggle.set_active(True)
-        render_page()
-        if ed.pending:
-            toast(f"{len(ed.pending)} proposed change(s) loaded — drag to adjust, Save to apply")
+
+        def initial_render():
+            render_page()
+            if ed.pending:
+                toast(
+                    f"{len(ed.pending)} proposed change(s) loaded — "
+                    "drag to adjust, Save to apply"
+                )
+            return False
+
         win.present()
+        GLib.idle_add(initial_render)
 
     app.connect("activate", on_activate)
     app.run(None)
