@@ -166,6 +166,13 @@ intersecting image samples, then fills the region opaque (default black).
 apply. Report adds `rects` and `verify: { "text_still_present": false }`; if
 verify fails, the whole batch fails.
 
+The GTK editor commits the **displayed rectangle** of each ghost (never a
+fresh `search_for`), so selecting one repeated word does not redact the
+others. CLI/MCP `--match` still means every occurrence on that page.
+
+If the page already has pending redaction annotations, `apply_now` (the
+default) refuses rather than also applying those unapproved regions.
+
 **Pen / ink is not redact.** Drawing a black ink stroke or rectangle overlay
 covers content visually but leaves the underlying text in `get_text()` /
 `pdftotext`. Only the `redact` op destroys content.

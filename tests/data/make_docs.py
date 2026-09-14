@@ -85,3 +85,35 @@ def make_secret_pdf(path: Path | str) -> Path:
     doc.save(str(path))
     doc.close()
     return path
+
+
+def make_unique_secret_pdf(
+    path: Path | str,
+    secret: str = "ZXQ-R01-SECRET-7f3a9c",
+) -> Path:
+    """Single-page PDF whose only sensitive token is a unique synthetic secret."""
+    path = Path(path)
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 72), "Visible header KEEP-VISIBLE", fontsize=12)
+    page.insert_text((72, 108), f"payload {secret} end", fontsize=12)
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def make_repeated_word_pdf(
+    path: Path | str,
+    word: str = "ALPHAWORD",
+    count: int = 3,
+) -> Path:
+    """One page with *count* identical words stacked vertically."""
+    path = Path(path)
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    for i in range(count):
+        page.insert_text((72, 72 + i * 48), word, fontsize=16)
+    page.insert_text((72, 72 + count * 48), "KEEP-VISIBLE", fontsize=12)
+    doc.save(str(path))
+    doc.close()
+    return path
