@@ -44,13 +44,18 @@ from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .page_preview import PagePreviewState
 from .view_gestures import (
+    HANDLE_VISUAL_HALF,
+    SELECT_HANDLE_PAD,
     compute_pinch_focus,
     current_zoom_pct,
+    handle_hit_radius,
+    hit_resize_handle,
     mapped_point,
     page_y_at_focus,
     pinch_live_pct,
     pinch_pixmap_scale,
     popover_is_alive,
+    resize_signature_keep_aspect,
     scroll_to_keep_focus,
     signature_ghost,
 )
@@ -442,6 +447,7 @@ class Editor:
         self.live_stroke: list[tuple[float, float]] | None = None
         self.rubber: tuple[float, float, float, float] | None = None
         self.drag_base: tuple[float, float] | None = None
+        self.drag_resize: dict | None = None
         self.pen_color = PEN_COLORS[1][1]
         self.shape_kind = "rect"
         self.zoom_pct: float | None = None  # None = fit page in viewport
@@ -737,7 +743,21 @@ class Editor:
             x0, y0, x1, y1 = self.item_rect(it)
             if x0 - 4 <= x <= x1 + 4 and y0 - 4 <= y <= y1 + 4:
                 return it
+            if it["kind"] == "sig" and hit_resize_handle(
+                x, y, x0, y0, x1, y1, radius=handle_hit_radius(self.zoom)
+            ):
+                return it
         return None
+
+    def hit_sig_handle(self, x, y, *, zoom: float = 1.0) -> str | None:
+        """Corner handle under ``(x, y)`` on the selected signature ghost."""
+        it = self.selected
+        if it is None or it not in self.pending or it.get("kind") != "sig":
+            return None
+        x0, y0, x1, y1 = self.item_rect(it)
+        return hit_resize_handle(
+            x, y, x0, y0, x1, y1, radius=handle_hit_radius(zoom)
+        )
 
     def hit_widget(self, x, y):
         """Return an empty AcroForm text widget at (x, y), if any."""
@@ -1165,18 +1185,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             selected = ed.selected if ed.selected in ed.pending else None
             if it is selected:
                 x0, y0, x1, y1 = ed.item_rect(it)
-                w, h = x1 - x0 + 8, y1 - y0 + 8
+                pad = SELECT_HANDLE_PAD
+                w, h = x1 - x0 + pad * 2, y1 - y0 + pad * 2
                 # Tinted fill + solid border + corner handles: unmistakable.
                 ctx.set_source_rgba(*SELECT_COLOR, 0.10)
-                ctx.rectangle(x0 - 4, y0 - 4, w, h)
+                ctx.rectangle(x0 - pad, y0 - pad, w, h)
                 ctx.fill()
                 ctx.set_source_rgba(*SELECT_COLOR, 0.95)
                 ctx.set_line_width(1.6)
-                ctx.rectangle(x0 - 4, y0 - 4, w, h)
+                ctx.rectangle(x0 - pad, y0 - pad, w, h)
                 ctx.stroke()
-                hs = 3.2
-                for hx in (x0 - 4, x0 - 4 + w):
-                    for hy in (y0 - 4, y0 - 4 + h):
+                hs = HANDLE_VISUAL_HALF
+                for hx in (x0 - pad, x1 + pad):
+                    for hy in (y0 - pad, y1 + pad):
                         ctx.set_source_rgb(1, 1, 1)
                         ctx.rectangle(hx - hs, hy - hs, hs * 2, hs * 2)
                         ctx.fill_preserve()
@@ -1508,14 +1529,38 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 ed.rubber = (px, py, px, py)
             elif ed.tool == "select":
                 hit_item = ed.hit(px, py)
-                if hit_item:
+                handle = ed.hit_sig_handle(px, py, zoom=ed.zoom)
+                target = ed.selected if handle else None
+                if handle is None and hit_item and hit_item.get("kind") == "sig":
+                    x0, y0, x1, y1 = ed.item_rect(hit_item)
+                    handle = hit_resize_handle(
+                        px, py, x0, y0, x1, y1, radius=handle_hit_radius(ed.zoom)
+                    )
+                    if handle:
+                        target = hit_item
+                if handle and target is not None and target in ed.pending:
+                    ed.selected = target
+                    ed.checkpoint()
+                    ed.drag_resize = {
+                        "handle": handle,
+                        "aspect": (target["h"] / target["w"]) if target["w"] else 1.0,
+                        "x": target["x"],
+                        "y": target["y"],
+                        "w": target["w"],
+                        "h": target["h"],
+                        "start": (px, py),
+                    }
+                    ed.drag_base = None
+                elif hit_item:
                     ed.selected = hit_item
                     ed.checkpoint()
                     ed.drag_base = (0.0, 0.0)
+                    ed.drag_resize = None
                 else:
                     saved = ed.hit_saved_annot(px, py)
                     ed.selected = saved
                     ed.drag_base = None
+                    ed.drag_resize = None
             area.queue_draw()
 
         def on_drag_update(_g, dx, dy):
@@ -1526,6 +1571,29 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             elif ed.tool in ("highlight", "redact", "shape", "crop") and ed.rubber:
                 x0, y0, _, _ = ed.rubber
                 ed.rubber = (x0, y0, x0 + pdx, y0 + pdy)
+            elif (
+                ed.tool == "select"
+                and ed.drag_resize
+                and ed.selected in ed.pending
+                and ed.selected.get("kind") == "sig"
+            ):
+                spec = ed.drag_resize
+                cur_x = spec["start"][0] + pdx
+                cur_y = spec["start"][1] + pdy
+                nx, ny, nw, nh = resize_signature_keep_aspect(
+                    spec["x"],
+                    spec["y"],
+                    spec["w"],
+                    spec["h"],
+                    spec["handle"],
+                    cur_x,
+                    cur_y,
+                    aspect=spec["aspect"],
+                )
+                ed.selected["x"] = nx
+                ed.selected["y"] = ny
+                ed.selected["w"] = nw
+                ed.selected["h"] = nh
             elif (
                 ed.tool == "select"
                 and ed.selected in ed.pending
@@ -1604,6 +1672,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     finish_redact_drag["fn"]()
             ed.rubber = None
             ed.drag_base = None
+            ed.drag_resize = None
             area.queue_draw()
             refresh_title()
 

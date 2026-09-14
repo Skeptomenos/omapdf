@@ -9,6 +9,7 @@ onto the page as a ``place_signature`` ghost.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -16,6 +17,14 @@ SIG_DND_PREFIX = "omepreview-sig:"
 ZOOM_MIN_PCT = 25.0
 ZOOM_MAX_PCT = 400.0
 SIG_GHOST_WIDTH = 160.0
+SIG_MIN_WIDTH = 24.0
+# Selection chrome is drawn in PDF points (then scaled by zoom). Pad matches
+# the blue rect around a selected ghost; visual handles sit on its corners.
+SELECT_HANDLE_PAD = 4.0
+HANDLE_VISUAL_HALF = 3.2
+HANDLE_HIT_RADIUS = 10.0
+HANDLE_HIT_SCREEN_PX = 14.0
+RESIZE_HANDLES = ("nw", "ne", "sw", "se")
 
 
 def current_zoom_pct(zoom_pct: float | None, zoom: float) -> float:
@@ -224,3 +233,97 @@ def signature_ghost(
         "date": False,
         "signature": name,
     }
+
+
+def handle_hit_radius(zoom: float) -> float:
+    """Page-space radius so handles stay hittable at low zoom (~14 CSS px)."""
+    z = zoom if zoom > 0 else 1.0
+    return max(HANDLE_HIT_RADIUS, HANDLE_HIT_SCREEN_PX / z)
+
+
+def selection_handle_centers(
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    pad: float = SELECT_HANDLE_PAD,
+) -> dict[str, tuple[float, float]]:
+    """Corner-handle centers matching the selected-ghost chrome in the editor."""
+    return {
+        "nw": (x0 - pad, y0 - pad),
+        "ne": (x1 + pad, y0 - pad),
+        "sw": (x0 - pad, y1 + pad),
+        "se": (x1 + pad, y1 + pad),
+    }
+
+
+def hit_resize_handle(
+    px: float,
+    py: float,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    *,
+    radius: float = HANDLE_HIT_RADIUS,
+    pad: float = SELECT_HANDLE_PAD,
+) -> str | None:
+    """Return ``nw``/``ne``/``sw``/``se`` if ``(px, py)`` hits a corner handle."""
+    best: str | None = None
+    best_d = radius
+    for name, (hx, hy) in selection_handle_centers(x0, y0, x1, y1, pad).items():
+        d = math.hypot(px - hx, py - hy)
+        if d <= best_d:
+            best_d = d
+            best = name
+    return best
+
+
+def resize_signature_keep_aspect(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    handle: str,
+    px: float,
+    py: float,
+    *,
+    aspect: float | None = None,
+    min_width: float = SIG_MIN_WIDTH,
+) -> tuple[float, float, float, float]:
+    """New ``(x, y, w, h)`` after dragging ``handle`` to ``(px, py)``.
+
+    The opposite corner stays fixed. Width/height keep ``aspect`` (default
+    ``h / w``). Dragging past the anchor clamps to ``min_width`` rather than
+    flipping the rect.
+    """
+    if handle not in RESIZE_HANDLES:
+        raise ValueError(f"unknown resize handle {handle!r}")
+    if w <= 0:
+        w = min_width
+    if aspect is None:
+        aspect = h / w if w else 1.0
+    if aspect <= 0:
+        aspect = 1.0
+    x1, y1 = x + w, y + h
+    if handle == "se":
+        ax, ay = x, y
+        raw_w, raw_h = px - ax, py - ay
+    elif handle == "nw":
+        ax, ay = x1, y1
+        raw_w, raw_h = ax - px, ay - py
+    elif handle == "ne":
+        ax, ay = x, y1
+        raw_w, raw_h = px - ax, ay - py
+    else:  # sw
+        ax, ay = x1, y
+        raw_w, raw_h = ax - px, py - ay
+    new_w = max(raw_w, raw_h / aspect, min_width)
+    new_h = new_w * aspect
+    if handle == "se":
+        return ax, ay, new_w, new_h
+    if handle == "nw":
+        return ax - new_w, ay - new_h, new_w, new_h
+    if handle == "ne":
+        return ax, ay - new_h, new_w, new_h
+    return ax - new_w, ay, new_w, new_h
