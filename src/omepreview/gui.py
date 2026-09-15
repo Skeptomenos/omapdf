@@ -40,6 +40,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 
 from . import engine
 from . import gui_pages
+from . import theme as chrome_theme
 from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .ops import OpError
@@ -155,34 +156,29 @@ def _luminance(r: float, g: float, b: float) -> float:
 
 
 def _color_scheme_is_dark() -> bool:
-    """Honor Omarchy/GNOME color-scheme (same source as omarchy-theme-set-gnome)."""
-    try:
-        iface = Gio.Settings.new("org.gnome.desktop.interface")
-        scheme = iface.get_string("color-scheme")
-        if scheme == "prefer-dark":
-            return True
-        if scheme == "prefer-light":
-            return False
-    except Exception:
-        pass
-    gtk_settings = Gtk.Settings.get_default()
-    if gtk_settings is not None:
-        return gtk_settings.get_property("gtk-application-prefer-dark-theme")
-    return False
+    """Honor Omarchy/GNOME + freedesktop appearance color-scheme."""
+    return chrome_theme.color_scheme_is_dark()
 
 
 def _sync_color_scheme() -> None:
-    dark = _color_scheme_is_dark()
-    gtk_settings = Gtk.Settings.get_default()
-    if gtk_settings is not None:
-        gtk_settings.set_property("gtk-application-prefer-dark-theme", dark)
+    chrome_theme.sync_gtk_appearance()
 
 
 def _theme_colors(widget: Gtk.Widget) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     style = widget.get_style_context()
-    bg = style.lookup_color("theme_bg_color")[1]
-    fg = style.lookup_color("theme_fg_color")[1]
-    return (bg.red, bg.green, bg.blue), (fg.red, fg.green, fg.blue)
+    found_bg, bg = style.lookup_color("theme_bg_color")
+    found_fg, fg = style.lookup_color("theme_fg_color")
+    if found_bg and bg is not None:
+        bg_rgb = (bg.red, bg.green, bg.blue)
+    else:
+        dark = _color_scheme_is_dark()
+        bg_rgb = (0.208, 0.208, 0.208) if dark else (0.965, 0.961, 0.957)
+    if found_fg and fg is not None:
+        fg_rgb = (fg.red, fg.green, fg.blue)
+    else:
+        dark = _color_scheme_is_dark()
+        fg_rgb = (0.933, 0.933, 0.925) if dark else (0.180, 0.204, 0.212)
+    return bg_rgb, fg_rgb
 
 
 def _desk_rgb(bg: tuple[float, float, float], light: bool) -> tuple[float, float, float]:
@@ -234,14 +230,31 @@ def _editorial_css(light: bool) -> bytes:
     return f"""
 @define-color omapdf_desk shade(@theme_bg_color, {desk_factor});
 
+window.omapdf-editor {{
+  background: @omapdf_desk;
+  color: @theme_fg_color;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}}
 window.omapdf-editor, scrolledwindow.omapdf-thumb-rail, listbox.omapdf-thumbs {{
   background: @omapdf_desk;
+  color: @theme_fg_color;
 }}
 scrolledwindow.omapdf-page-canvas {{
   background: @omapdf_desk;
 }}
 
+popover.background,
+popover.background > contents,
+popover.menu,
+popover.menu > contents {{
+  background: @theme_bg_color;
+  color: @theme_fg_color;
+}}
+
 box.omapdf-overlay-toolbar {{
+  color: @theme_fg_color;
   background-image: linear-gradient(to right,
     alpha(@omapdf_desk, 0), alpha(@omapdf_desk, 0.94) 10px, alpha(@omapdf_desk, 0.94));
   border: none;
@@ -1782,25 +1795,42 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         # -- toolbar ------------------------------------------------------
 
         css = Gtk.CssProvider()
-        _light = not _color_scheme_is_dark()
-        _bg, _fg = _theme_colors(win)
-        chrome["desk"] = _desk_rgb(_bg, _light)
-        chrome["fg"] = _fg
-        chrome["light"] = _light
-        chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
-        css.load_from_data(_editorial_css(_light))
-        if show_window_controls:
-            css.load_from_data(WINDOW_CONTROLS_CSS)
+        rail_css = Gtk.CssProvider()
+        applying = {"on": False}
+
+        def apply_chrome(*_a):
+            if applying["on"]:
+                return
+            applying["on"] = True
+            try:
+                chrome_theme.sync_gtk_appearance()
+                _bg, _fg = _theme_colors(win)
+                _light = chrome_theme.desk_is_light(_bg)
+                chrome["desk"] = _desk_rgb(_bg, _light)
+                chrome["fg"] = _fg
+                chrome["light"] = _light
+                chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
+                blob = _editorial_css(_light)
+                if show_window_controls:
+                    blob += WINDOW_CONTROLS_CSS
+                css.load_from_data(blob)
+                area.queue_draw()
+                win.queue_draw()
+            finally:
+                applying["on"] = False
+
+        apply_chrome()
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-        rail_css = Gtk.CssProvider()
         rail_css.load_from_data(_overlay_rail_css())
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             rail_css,
             Gtk.STYLE_PROVIDER_PRIORITY_USER,
         )
+        chrome_theme.watch_appearance(apply_chrome)
+        win.connect("realize", apply_chrome)
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         toolbar.add_css_class("omapdf-overlay-toolbar")
