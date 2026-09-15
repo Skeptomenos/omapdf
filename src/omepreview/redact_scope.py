@@ -204,13 +204,165 @@ def intersecting_payloads(page: pymupdf.Page, rects: list) -> list[str]:
     return leftovers
 
 
-def text_still_present(page: pymupdf.Page, match: str | None, rects: list) -> bool:
-    if match is not None:
-        return match in page.get_text()
+# Word-snap rects from get_text("words") often graze the next line's glyphs
+# (Times descenders, tight leading). page.get_textbox(clip) then reports the
+# neighbor as leftover even when apply_redactions left it intact on purpose.
+# A glyph counts as inside the authorized rectangle only when this fraction
+# of its bbox area is covered — neighbors that merely clip the edge do not.
+_SUBSTANTIALLY_INSIDE = 0.5
+_REMNANT_SNIPPET = 48
+
+
+def _iter_glyphs(page: pymupdf.Page):
+    """Extractable characters (or whole spans) with their PDF bboxes."""
+    data = page.get_text("rawdict")
+    for block in data.get("blocks", []) or []:
+        if block.get("type", 0) != 0:
+            continue
+        for line in block.get("lines", []) or []:
+            for span in line.get("spans", []) or []:
+                chars = span.get("chars") or []
+                if chars:
+                    for ch in chars:
+                        glyph = ch.get("c") or ""
+                        bbox = ch.get("bbox")
+                        if not glyph or bbox is None:
+                            continue
+                        rect = _as_rect(bbox)
+                        if rect.is_empty or not rect.is_valid:
+                            continue
+                        yield glyph, rect
+                    continue
+                text = span.get("text") or ""
+                bbox = span.get("bbox")
+                if not text.strip() or bbox is None:
+                    continue
+                rect = _as_rect(bbox)
+                if rect.is_empty or not rect.is_valid:
+                    continue
+                yield text, rect
+
+
+def _inside_fraction(glyph, clip) -> float:
+    g = _as_rect(glyph)
+    c = _as_rect(clip)
+    if g.is_empty or not g.is_valid:
+        return 0.0
+    area = g.get_area()
+    if area <= 0:
+        return 0.0
+    inter = g & c
+    if inter.is_empty:
+        return 0.0
+    return inter.get_area() / area
+
+
+def expand_rects_to_glyphs(page: pymupdf.Page, rects: list) -> list[pymupdf.Rect]:
+    """Grow each authorized rect to the ink of glyphs already inside it.
+
+    Undersized word-snap boxes miss descenders; union with those glyph bboxes
+    so apply_redactions covers the ink. Does not grow to neighbors that only
+    graze the edge (coverage below ``_SUBSTANTIALLY_INSIDE``). Keeps the
+    original rect when no glyphs qualify so image-only regions still apply.
+    """
+    glyphs = [(ch, rect) for ch, rect in _iter_glyphs(page) if ch.strip()]
+    expanded: list[pymupdf.Rect] = []
     for rect in rects:
-        if page.get_textbox(_as_rect(rect)).strip():
-            return True
-    return False
+        clip = _as_rect(rect)
+        union = pymupdf.Rect(clip)
+        for _ch, glyph in glyphs:
+            if _inside_fraction(glyph, clip) >= _SUBSTANTIALLY_INSIDE:
+                union |= glyph
+        expanded.append(union)
+    return expanded
+
+
+def remnants_inside_rects(page: pymupdf.Page, rects: list) -> list[dict]:
+    """Extractable glyphs whose bbox is substantially inside a redact rect."""
+    glyphs = [(ch, rect) for ch, rect in _iter_glyphs(page) if ch.strip()]
+    remnants: list[dict] = []
+    for rect in rects:
+        clip = _as_rect(rect)
+        bits: list[str] = []
+        boxes: list[pymupdf.Rect] = []
+        for ch, glyph in glyphs:
+            if _inside_fraction(glyph, clip) >= _SUBSTANTIALLY_INSIDE:
+                bits.append(ch)
+                boxes.append(glyph)
+        if not bits:
+            continue
+        covered = boxes[0]
+        for box in boxes[1:]:
+            covered |= box
+        snippet = "".join(bits).replace("\n", " ")
+        if len(snippet) > _REMNANT_SNIPPET:
+            snippet = snippet[:_REMNANT_SNIPPET] + "…"
+        remnants.append(
+            {
+                "snippet": snippet,
+                "bbox": [covered.x0, covered.y0, covered.x1, covered.y1],
+                "rect": [clip.x0, clip.y0, clip.x1, clip.y1],
+            }
+        )
+    return remnants
+
+
+def _format_remnants(remnants: list[dict]) -> str:
+    parts = []
+    for rem in remnants:
+        bbox = ", ".join(f"{v:.2f}" for v in rem["bbox"])
+        parts.append(f"{rem['snippet']!r} at [{bbox}]")
+    return "leftover " + "; ".join(parts) + " still extractable inside the redact rectangle"
+
+
+def leftover_text_detail(
+    page: pymupdf.Page, match: str | None, rects: list
+) -> str | None:
+    """Why rect/match redact still has extractable text, or None if clean.
+
+    Match ops fail if the string remains anywhere on the page. Rect ops fail
+    only for glyphs substantially inside the rectangle (word-snap neighbors
+    that merely clip the edge are not leftovers). Clip text with no glyph
+    explanation still fails closed.
+    """
+    if match is not None:
+        if match in page.get_text():
+            return f"match {match!r} still extractable"
+        return None
+    remnants = remnants_inside_rects(page, rects)
+    if remnants:
+        return _format_remnants(remnants)
+    glyphs = [(ch, rect) for ch, rect in _iter_glyphs(page) if ch.strip()]
+    for rect in rects:
+        clip = _as_rect(rect)
+        snippet = page.get_textbox(clip).strip()
+        if not snippet:
+            continue
+        has_inside = False
+        has_graze = False
+        for _ch, glyph in glyphs:
+            frac = _inside_fraction(glyph, clip)
+            if frac >= _SUBSTANTIALLY_INSIDE:
+                has_inside = True
+                break
+            if frac > 0:
+                has_graze = True
+        if has_inside:
+            continue
+        if has_graze:
+            continue
+        shown = snippet.replace("\n", " ")
+        if len(shown) > _REMNANT_SNIPPET:
+            shown = shown[:_REMNANT_SNIPPET] + "…"
+        return (
+            f"leftover {shown!r} still extractable inside the redact "
+            "rectangle (unboxed clip text)"
+        )
+    return None
+
+
+def text_still_present(page: pymupdf.Page, match: str | None, rects: list) -> bool:
+    return leftover_text_detail(page, match, rects) is not None
 
 
 def verify_serialized(doc: pymupdf.Document, op: dict) -> None:
@@ -223,11 +375,9 @@ def verify_serialized(doc: pymupdf.Document, op: dict) -> None:
     page = doc[page_no - 1]
     rects = [pymupdf.Rect(r) for r in op["rects"]]
     match = op.get("match")
-    if text_still_present(page, match, rects):
-        raise OpError(
-            f"redact verify failed on page {page_no}: text still present after "
-            "redaction — widen the region or check for overlapping content"
-        )
+    detail = leftover_text_detail(page, match, rects)
+    if detail:
+        raise OpError(f"redact verify failed on page {page_no}: {detail}")
     leftovers = intersecting_payloads(page, rects)
     if leftovers:
         raise OpError(

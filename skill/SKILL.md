@@ -113,9 +113,11 @@ show-in-folder).
   asked for on that file.
 - **Redact means destroy.** Region redact removes page text in the rectangle
   **and** intersecting sticky notes/replies, FreeText, file attachments, and
-  form values. Unsupported intersecting annot types fail closed — do not
-  report a successful redact while a payload remains. Ink/black boxes are
-  not redact.
+  form values. Word-snap verify is glyph-coverage, not `get_textbox` clip —
+  a neighbor that only grazes the box is not leftover; a glyph still inside
+  is named in the error. Unsupported intersecting annot types fail closed —
+  do not report a successful redact while a payload remains. Ink/black boxes
+  are not redact.
 - **Finish for sending:** offer `omepreview flatten out.pdf -o final.pdf` when
   the copy is going to someone else; keep the unflattened version. Flatten
   refuses if the file still has pending PDF redaction annotations — apply a

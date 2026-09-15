@@ -164,11 +164,16 @@ PyMuPDF `add_redact_annot` + `apply_redactions()` removes matched text and
 intersecting image samples, then fills the region opaque (default black).
 The same authorized rectangle also **strips** intersecting sticky notes
 (and their replies), FreeText, file-attachment annotations, and form
-fields/values. After save, verification reopens the serialized file and
-checks object payloads as well as page text. If an intersecting annotation
-type is not in that list (stamp, ink, highlight, sound, …), redact **refuses**
-rather than reporting success while a payload remains. Annotations wholly
-outside the rectangle are left intact.
+fields/values. Apply grows each rectangle to the glyph bboxes already
+substantially inside it (so a tight word-snap covers descenders) without
+taking neighbors that only graze the edge. After save, verification reopens
+the serialized file and checks object payloads plus glyphs whose bbox is
+**substantially inside** the applied rectangle — not raw `get_textbox(clip)`,
+which reports the next line when Times-like word boxes overlap. A leftover
+glyph is named in the error (`leftover 'TOKEN' at [x0, y0, x1, y1]`). If an
+intersecting annotation type is not in that list (stamp, ink, highlight,
+sound, …), redact **refuses** rather than reporting success while a payload
+remains. Annotations wholly outside the rectangle are left intact.
 
 `apply_now: false` adds redaction annotations as editable ghosts until a later
 apply. Report adds `rects` and

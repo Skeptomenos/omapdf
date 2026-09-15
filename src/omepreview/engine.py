@@ -322,10 +322,11 @@ def _apply_insert_pages(doc, op) -> dict:
 
 
 def _verify_redact(page: pymupdf.Page, match: str | None, rects: list[pymupdf.Rect]) -> dict:
-    still = redact_scope.text_still_present(page, match, rects)
+    remnant = redact_scope.leftover_text_detail(page, match, rects)
     leftovers = redact_scope.intersecting_payloads(page, rects)
     return {
-        "text_still_present": still,
+        "text_still_present": remnant is not None,
+        "text_remnant": remnant,
         "payloads_still_present": leftovers,
     }
 
@@ -397,6 +398,7 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
         rects = [pymupdf.Rect(op["rect"])]
         verify_match = None
 
+    rects = redact_scope.expand_rects_to_glyphs(page, rects)
     result = {"rects": [list(r) for r in rects]}
 
     if dry_run:
@@ -425,10 +427,11 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
     verify = _verify_redact(page, verify_match, rects)
     result["verify"] = verify
     if verify["text_still_present"]:
-        raise OpError(
-            f"redact verify failed on page {op['page']}: text still present after "
-            "redaction — widen the region or check for overlapping content"
+        remnant = verify.get("text_remnant") or (
+            "text still present after redaction — widen the region or "
+            "check for overlapping content"
         )
+        raise OpError(f"redact verify failed on page {op['page']}: {remnant}")
     leftovers = verify.get("payloads_still_present") or []
     if leftovers:
         raise OpError(
