@@ -46,6 +46,9 @@ def test_pkgbuild_installs_omapreview_desktop_from_omapreview_repo():
     assert "python-cairo" in text
     assert "gtk4" in text
     assert "git+$url" not in text
+    assert "sha256sums=('SKIP')" not in text
+    assert "67e1aa28845b4b4e016a2d6b38a065d9c501abef53f482330c819ef0068fb8bc" in text
+    assert 'cd "$pkgname-$pkgver"' in text
 
 
 def test_edit_accepts_a_missing_pdf_for_the_launcher():
