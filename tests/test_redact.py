@@ -43,7 +43,8 @@ def test_match_redact_removes_text(secret_pdf, tmp_path):
         [{"op": "redact", "page": 1, "match": "SECRET"}],
         output=out,
     )
-    assert result["applied"][0]["verify"] == {"text_still_present": False}
+    assert result["applied"][0]["verify"]["text_still_present"] is False
+    assert result["applied"][0]["verify"]["payloads_still_present"] == []
     text = pymupdf.open(out)[0].get_text()
     assert "SECRET" not in text
     assert "Public" in text
