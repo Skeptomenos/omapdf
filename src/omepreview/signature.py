@@ -16,14 +16,19 @@ import os
 import shutil
 from pathlib import Path
 
+from .fs_privacy import chmod_private_file, ensure_private_dir
+
 _SUFFIXES = (".svg", ".png")
 
 
 def store_dir(*, create: bool = True) -> Path:
-    """Writable store: ~/Downloads/omapreview/signature/."""
-    d = Path.home() / "Downloads" / "omapreview" / "signature"
+    """Writable store: ~/Downloads/omapreview/signature/ (mode 0700)."""
+    downloads = Path.home() / "Downloads"
+    d = downloads / "omapreview" / "signature"
     if create:
-        d.mkdir(parents=True, exist_ok=True)
+        downloads.mkdir(exist_ok=True)
+        ensure_private_dir(d.parent)
+        ensure_private_dir(d)
     return d
 
 
@@ -77,6 +82,7 @@ def add(source: str | Path, name: str = "default") -> Path:
     dest_dir = store_dir(create=True)
     dest = dest_dir / f"{name}{suffix}"
     shutil.copyfile(source, dest)
+    chmod_private_file(dest)
     other = ".png" if suffix == ".svg" else ".svg"
     (dest_dir / f"{name}{other}").unlink(missing_ok=True)
     return dest

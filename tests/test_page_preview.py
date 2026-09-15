@@ -27,6 +27,13 @@ def test_preview_move_pages(tmp_path):
     assert labels == ["1", "5", "6", "2", "3", "4"]
 
 
+def test_identities_match_engine_order_after_move(tmp_path):
+    pdf = make_labeled_pdf(tmp_path / "six.pdf", page_count=6)
+    state = PagePreviewState(pdf)
+    state.add_move_pages([5, 6], after=1)
+    assert state.identities() == [0, 4, 5, 1, 2, 3]
+
+
 def test_preview_illegal_move_is_noop(tmp_path):
     pdf = make_labeled_pdf(tmp_path / "six.pdf", page_count=6)
     state = PagePreviewState(pdf)

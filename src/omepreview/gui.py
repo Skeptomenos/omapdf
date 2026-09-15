@@ -42,9 +42,15 @@ from . import engine
 from . import gui_pages
 from . import theme as chrome_theme
 from .crop_coords import transform_pending_for_crop
+from .export_guard import unsaved_export_reason
+from .fs_privacy import chmod_private_file
 from . import signature as sig_store
 from .ops import OpError
-from .page_preview import PagePreviewState
+from .page_preview import (
+    PagePreviewState,
+    rebind_items_to_identities,
+    remap_page_index,
+)
 from .render import raster_page
 from .redact_io import (
     match_redact_ghosts,
@@ -513,6 +519,8 @@ class Editor:
         self.search_hits: list[tuple[int, pymupdf.Rect]] = []
         self.search_pos = -1
         self.page_preview = PagePreviewState(self.path)
+        self.page_preview.on_identities_changed = self._rebind_pending_pages
+        self.last_dropped_pending = 0
         self.window: Gtk.Window | None = None
         self._view_doc: pymupdf.Document | None = None
         self.redact_free_rect = False
@@ -520,6 +528,29 @@ class Editor:
         self.redact_modal_shown = False
         if ops_file:
             self._load_proposals(ops_file)
+
+    def _rebind_pending_pages(self, old_ids: list[int], new_ids: list[int]) -> None:
+        """Keep ghosts and search hits on the same logical page after surgery."""
+        dropped = rebind_items_to_identities(self.pending, old_ids, new_ids)
+        self.last_dropped_pending += dropped
+        if self.selected is not None and self.selected not in self.pending:
+            self.selected = None
+        remapped_hits: list[tuple[int, pymupdf.Rect]] = []
+        for pno, rect in self.search_hits:
+            new_page = remap_page_index(pno, old_ids, new_ids)
+            if new_page is not None:
+                remapped_hits.append((new_page, rect))
+        self.search_hits = remapped_hits
+        if self.search_hits:
+            self.search_pos = min(max(self.search_pos, 0), len(self.search_hits) - 1)
+        else:
+            self.search_pos = -1
+        if self.page_no < len(old_ids) and new_ids:
+            sid = old_ids[self.page_no]
+            try:
+                self.page_no = new_ids.index(sid)
+            except ValueError:
+                self.page_no = min(self.page_no, len(new_ids) - 1)
 
     # ---- model ----------------------------------------------------------
 
@@ -568,6 +599,7 @@ class Editor:
     def _restore_file(self, data: bytes):
         self.doc.close()
         Path(self.path).write_bytes(data)
+        chmod_private_file(self.path)
         self.doc = pymupdf.open(self.path)
         self.invalidate_view()
 
@@ -658,6 +690,7 @@ class Editor:
             if redact_ops and self.redact_save_as_copy:
                 created_copy = unused_sibling(source, "_redacted")
                 shutil.copy2(source, created_copy)
+                chmod_private_file(created_copy)
                 work_path = created_copy
             for op in page_ops:
                 engine.apply(work_path, [op], output=work_path)
@@ -2639,8 +2672,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         )
 
         def share_target():
-            if ed.pending or ed.page_preview.has_changes():
-                toast("Unsaved changes — Save before sharing")
+            reason = unsaved_export_reason(
+                ed.pending, ed.page_preview.has_changes(), action="sharing"
+            )
+            if reason:
+                toast(reason)
                 return None
             flatten = flatten_check.get_active()
             try:
@@ -3032,11 +3068,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 render_page()
 
         def on_sidebar_change():
+            dropped = ed.last_dropped_pending
+            ed.last_dropped_pending = 0
             ed.invalidate_view()
-            ed.page_no = min(ed.page_no, max(0, ed.page_count() - 1))
+            n_pages = ed.page_count()
+            if n_pages:
+                ed.page_no = min(ed.page_no, n_pages - 1)
             sidebar_api["refresh"]()
             render_page()
             refresh_title()
+            if dropped == 1:
+                toast("Dropped a pending edit on a deleted page")
+            elif dropped > 1:
+                toast(f"Dropped {dropped} pending edits on deleted pages")
 
         sidebar_api = gui_pages.build_page_sidebar(
             ed, on_sidebar_navigate, on_sidebar_change, toast

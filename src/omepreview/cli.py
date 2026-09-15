@@ -426,7 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
     _out_args(p)
     p.set_defaults(func=cmd_shape)
 
-    p = sub.add_parser("flatten", help="bake annotations and form fields into the page")
+    p = sub.add_parser(
+        "flatten",
+        help="bake annotations and form fields into the page (refuses pending redactions)",
+    )
     p.add_argument("pdf")
     p.add_argument("-o", "--output")
     p.add_argument("--json", action="store_true")

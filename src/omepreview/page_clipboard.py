@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pymupdf
 
+from .fs_privacy import chmod_private_file, scratch_dir
+
 MIME_OMEPREVIEW_PAGES = "application/x-omepreview-pages"
 MIME_OMAPDF_PAGES = "application/x-omapdf-pages"  # deprecated; accepted on paste
 MIME_PDF = "application/pdf"
@@ -58,10 +60,11 @@ def pdf_bytes_from_clipboard_text(text: str) -> bytes | None:
 
 
 def write_temp_pdf(pdf_bytes: bytes) -> Path:
-    fd, path = tempfile.mkstemp(suffix=".pdf")
+    fd, path = tempfile.mkstemp(suffix=".pdf", dir=str(scratch_dir()))
     try:
         with open(fd, "wb") as fh:
             fh.write(pdf_bytes)
+        chmod_private_file(path)
     except Exception:
         Path(path).unlink(missing_ok=True)
         raise
@@ -72,6 +75,7 @@ def write_pages_to_file(doc: pymupdf.Document, pages_1based: list[int], dest: st
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(extract_pages_bytes(doc, pages_1based))
+    chmod_private_file(dest)
     return dest
 
 

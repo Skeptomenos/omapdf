@@ -374,6 +374,9 @@ class RecorderSession:
             raise ValueError("draw a signature first — Space to record, Enter to save")
         path = Path(path)
         path.write_text(strokes_to_svg(self.strokes), encoding="utf-8")
+        from .fs_privacy import chmod_private_file
+
+        chmod_private_file(path)
         return path
 
 

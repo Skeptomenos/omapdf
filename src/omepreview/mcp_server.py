@@ -330,7 +330,12 @@ def add_shape(
 @mcp.tool()
 def flatten_pdf(path: str, output: str | None = None) -> dict:
     """Bake all annotations and form fields into page content (irreversible
-    in the output file; the input is preserved when `output` is given)."""
+    in the output file; the input is preserved when `output` is given).
+
+    Refuses when pending PDF redaction annotations exist — baking their
+    appearance does not remove the underlying text. Apply a reviewed redact
+    or delete those annotations first.
+    """
     return engine.flatten(path, output=output)
 
 

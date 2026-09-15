@@ -1,6 +1,7 @@
 """Signature store: SVG is the recorded format; PNG import still works."""
 
 from pathlib import Path
+import stat
 
 import pymupdf
 import pytest
@@ -26,6 +27,8 @@ def test_add_and_list_svg(tmp_path, monkeypatch):
     assert dest.parent.parent.parent.name == "Downloads"
     assert dest == tmp_path / "Downloads" / "omapreview" / "signature" / "jane.svg"
     assert dest.is_file()
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+    assert stat.S_IMODE(dest.parent.stat().st_mode) == 0o700
     assert signature.list_names() == ["jane"]
     assert signature.get("jane") == dest
 

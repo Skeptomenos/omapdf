@@ -12,13 +12,17 @@ gi.require_version("Gdk", "4.0")
 import pymupdf
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
+from .export_guard import (
+    UnsavedExport,
+    extract_pages_bytes_if_clean,
+    require_clean_export,
+    serialize_pages_if_clean,
+    write_pages_if_clean,
+)
 from .page_clipboard import (
     MIME_PDF,
-    extract_pages_bytes,
     push_clipboard,
     read_clipboard_pdf_bytes,
-    serialize_pages,
-    write_pages_to_file,
     write_temp_pdf,
 )
 from .ops import OpError
@@ -186,7 +190,16 @@ def build_page_sidebar(
                     state = g.get_current_event_state()
                     if state & Gdk.ModifierType.SHIFT_MASK:
                         pages = selected_1based() or [idx + 1]
-                        pdf = extract_pages_bytes(pages_doc(), pages)
+                        try:
+                            pdf = extract_pages_bytes_if_clean(
+                                ed.pending,
+                                ed.page_preview.has_changes(),
+                                pages_doc(),
+                                pages,
+                            )
+                        except UnsavedExport as exc:
+                            toast(str(exc))
+                            return None
                         return Gdk.ContentProvider.new_for_bytes(
                             MIME_PDF, GLib.Bytes.new(pdf)
                         )
@@ -472,6 +485,15 @@ def build_page_sidebar(
 
     def act_extract(_a, _p):
         pages = selected_1based() or [ed.page_no + 1]
+        try:
+            require_clean_export(
+                ed.pending,
+                ed.page_preview.has_changes(),
+                action="exporting pages",
+            )
+        except UnsavedExport as exc:
+            toast(str(exc))
+            return
         dialog = Gtk.FileDialog()
         dialog.set_title("Extract selected pages")
         dialog.set_initial_name("excerpt.pdf")
@@ -485,8 +507,16 @@ def build_page_sidebar(
             if not path:
                 return
             try:
-                write_pages_to_file(pages_doc(), pages, path)
+                write_pages_if_clean(
+                    ed.pending,
+                    ed.page_preview.has_changes(),
+                    pages_doc(),
+                    pages,
+                    path,
+                )
                 toast(f"Extracted {len(pages)} page(s) to {Path(path).name}")
+            except UnsavedExport as exc:
+                toast(str(exc))
             except Exception as exc:
                 toast(f"Extract failed: {exc}")
 
@@ -569,8 +599,16 @@ def build_page_sidebar(
     def copy_selected_pages() -> bool:
         pages = selected_1based() or [ed.page_no + 1]
         try:
-            json_bytes, pdf_bytes = serialize_pages(pages_doc(), pages)
+            json_bytes, pdf_bytes = serialize_pages_if_clean(
+                ed.pending,
+                ed.page_preview.has_changes(),
+                pages_doc(),
+                pages,
+            )
             push_clipboard(json_bytes, pdf_bytes)
+        except UnsavedExport as exc:
+            toast(str(exc))
+            return False
         except Exception as exc:
             toast(f"Copy failed: {exc}")
             return False
