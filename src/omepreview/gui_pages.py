@@ -71,6 +71,7 @@ def build_page_sidebar(
     side_list = Gtk.ListBox()
     side_list.add_css_class("omapdf-thumbs")
     overlay = Gtk.Overlay()
+    overlay.add_css_class("omapdf-thumbs-overlay")
     overlay.set_child(side_list)
     slot_line = Gtk.Box()
     slot_line.add_css_class("omapdf-drop-slot")
