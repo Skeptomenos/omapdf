@@ -1,7 +1,7 @@
-# Maintainer: Peter Bergin
-pkgname=omepreview
-pkgver=0.0.1
-pkgrel=2
+# Maintainer: David Hapunkt <Skeptomenos@users.noreply.github.com>
+pkgname=omapreview
+pkgver=0.1.0
+pkgrel=1
 pkgdesc="Preview-style PDF viewer and reviewer for Linux"
 arch=('any')
 url="https://github.com/Skeptomenos/omapreview"
@@ -11,31 +11,26 @@ optdepends=(
   'python-mcp: MCP server for AI agents (omapreview-mcp)'
   'omarchy: bar widget and menu-based PDF picker'
 )
-provides=('omapreview')
-makedepends=('git' 'python-build' 'python-installer' 'python-hatchling')
-# No GitHub release tag exists. Do not use archive/v$pkgver — that tarball
-# is not published. Package current main.
-# Launcher name and command: omapreview (Python package remains omepreview).
-source=("$pkgname::git+$url.git#branch=main")
+makedepends=('python-build' 'python-installer' 'python-hatchling' 'python-wheel')
+# GitHub tag archive (not a clone of the app repo). Directory is omapreview-v$pkgver.
+source=("$pkgname-$pkgver.tar.gz::https://github.com/Skeptomenos/omapreview/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-  cd "$pkgname"
+  cd "$pkgname-v$pkgver"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$pkgname"
+  cd "$pkgname-v$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm755 bin/omepreview-pick "$pkgdir/usr/bin/omepreview-pick"
   install -Dm644 share/omapreview.desktop "$pkgdir/usr/share/applications/omapreview.desktop"
 
-  # Omarchy bar widget, discoverable for manual linking into
-  # ~/.config/omarchy/plugins/
-  install -d "$pkgdir/usr/share/omepreview"
-  cp -r shell-plugin "$pkgdir/usr/share/omepreview/shell-plugin"
-  cp -r skill "$pkgdir/usr/share/omepreview/skill"
+  install -d "$pkgdir/usr/share/omapreview"
+  cp -r shell-plugin "$pkgdir/usr/share/omapreview/shell-plugin"
+  cp -r skill "$pkgdir/usr/share/omapreview/skill"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

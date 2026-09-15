@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_pyproject_omapreview_console_script_alias():
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = data["project"]["scripts"]
+    assert data["project"]["version"] == "0.1.0"
     assert scripts["omapreview"] == "omepreview.cli:main"
     assert scripts["omepreview"] == "omepreview.cli:main"
     assert data["project"]["urls"]["Homepage"] == "https://github.com/Skeptomenos/omapreview"
@@ -34,10 +35,17 @@ def test_legacy_omepreview_desktop_is_hidden():
 
 def test_pkgbuild_installs_omapreview_desktop_from_omapreview_repo():
     text = (ROOT / "packaging/PKGBUILD").read_text(encoding="utf-8")
+    assert "pkgname=omapreview" in text
+    assert "pkgver=0.1.0" in text
     assert "share/omapreview.desktop" in text
     assert "$pkgdir/usr/share/applications/omapreview.desktop" in text
     assert 'url="https://github.com/Skeptomenos/omapreview"' in text
-    assert "provides=('omapreview')" in text
+    assert "archive/refs/tags/v$pkgver.tar.gz" in text
+    assert "python-pymupdf" in text
+    assert "python-gobject" in text
+    assert "python-cairo" in text
+    assert "gtk4" in text
+    assert "git+$url" not in text
 
 
 def test_edit_accepts_a_missing_pdf_for_the_launcher():

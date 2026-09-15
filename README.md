@@ -1,6 +1,6 @@
-# omepreview
+# omapreview
 
-**A Preview-class PDF studio for Omarchy and plain GTK Linux.** · **0.0.1**
+**A Preview-class PDF studio for Omarchy and plain GTK Linux.** · **0.1.0**
 
 omepreview is a fast GTK4 editor for reading, marking up, and signing PDFs —
 with Preview-style page surgery, true redaction, and trackpad signatures. One
@@ -57,30 +57,26 @@ Forked from [omapdf](https://github.com/pbergin11/omapdf). omepreview is its own
 
 ## Install
 
-No GitHub release tag yet. Clone `main` and use a venv (keeps system GTK
-bindings for the editor):
+The user-facing command and launcher name is **omapreview**. The Python package
+is still `omepreview`.
+
+**Arch / Omarchy** (after the AUR package is published):
+
+```bash
+yay -S omapreview
+```
+
+That installs `/usr/bin/omapreview` and `omapreview.desktop`. Super+Space,
+type `omapreview`.
+
+**Contributors** (git checkout, not the visitor path):
 
 ```bash
 git clone https://github.com/Skeptomenos/omapreview.git
 cd omapreview   # on omarchy-air the checkout is ~/omepreview
-python -m venv --system-site-packages .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/omapreview --version          # omapreview 0.0.1
+bash packaging/install-user.sh
+.venv/bin/omapreview --version          # omapreview 0.1.0
 ```
-
-The Python package is still `omepreview`; `omapreview` is the launcher command
-(alias of the same CLI). On Omarchy, [`packaging/install-user.sh`](packaging/install-user.sh)
-puts `omapreview` on `~/.local/bin` and installs
-`~/.local/share/applications/omapreview.desktop`.
-
-**Arch:** [`packaging/PKGBUILD`](packaging/PKGBUILD) builds **git `main`**, not
-a `v0.0.1` tarball (that archive is not published). From a clone:
-
-```bash
-cd packaging && makepkg -si
-```
-
-Or skip packaging and use the venv / `install-user.sh` path above.
 
 Desktop handler: `share/omapreview.desktop` · Application ID: `org.omepreview.Editor`
 
@@ -94,7 +90,7 @@ omapreview edit document.pdf
 omapreview read document.pdf --json
 omapreview sig draw                   # Space to record; Enter saves SVG
 omapreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
-omapreview --version                  # omapreview 0.0.1
+omapreview --version                  # omapreview 0.1.0
 ```
 
 ## For agents
@@ -102,8 +98,8 @@ omapreview --version                  # omapreview 0.0.1
 Every edit is a list of JSON ops. See [`docs/ops.md`](docs/ops.md).
 
 ```bash
-omepreview apply --ops edits.json -o out.pdf
-omepreview-mcp
+omapreview apply --ops edits.json -o out.pdf
+omapreview-mcp
 ```
 
 ## License
