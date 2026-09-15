@@ -1,4 +1,4 @@
-"""Adwaita color-scheme drives chrome; PDF paper stays white."""
+"""Adwaita color-scheme drives chrome off Omarchy; PDF paper stays white."""
 
 from pathlib import Path
 
@@ -46,9 +46,14 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     assert "border: 2px" not in body
     assert "#" not in body.replace("def _editorial_css", "")
     apply = src[src.index("def apply_chrome") : src.index("chrome_theme.watch_appearance")]
+    assert "load_omarchy_palette" in apply
+    assert "css_defines" in apply
+    assert "blob = prefix + _editorial_css" in apply
     assert "blob += WINDOW_CONTROLS_CSS" in apply
     assert "css.load_from_data(blob)" in apply
     assert "css.load_from_data(WINDOW_CONTROLS_CSS)" not in src
     assert "sync_gtk_appearance" in apply
     assert "desk_is_light" in apply
     assert "ctx.set_source_rgb(1, 1, 1)" in src
+    tail = src[src.index("chrome_theme.watch_appearance") : src.index('win.connect("realize"')]
+    assert "watch_theme_set" in tail

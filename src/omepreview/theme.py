@@ -1,17 +1,18 @@
-"""Adwaita / Omarchy color-scheme for editor chrome.
+"""Editor chrome: Omarchy ``colors.toml`` when present, else Adwaita.
 
-Omarchy's ``omarchy-theme-set-gnome`` writes both
-``org.gnome.desktop.interface color-scheme`` (prefer-dark / prefer-light)
-and ``gtk-theme`` (Adwaita / Adwaita-dark). The freedesktop portal
-``org.freedesktop.appearance color-scheme`` is the same switch GTK 4 reads
-(0 = no preference, 1 = prefer dark, 2 = prefer light).
+On Omarchy, ``omarchy-theme-set`` writes
+``~/.local/state/omarchy/current/theme/colors.toml`` (legacy:
+``~/.config/omarchy/current/theme/colors.toml``) and fires the
+``theme-set`` hook after an atomic swap of ``theme/``. This process reads
+that palette at startup, applies every resolved color in one CSS load, and
+watches ``current/`` so the swap (and therefore the hook) reloads chrome.
 
-``gtk-application-prefer-dark-theme`` alone cannot lighten a process that
-already has ``gtk-theme-name=Adwaita-dark`` — that is why rails stayed
-dark on a light Omarchy desktop. Sync theme name + prefer-dark, then let
-editorial CSS derive from ``@theme_bg_color`` / ``@theme_fg_color``.
+Off Omarchy, or when the file is missing/invalid, GNOME ``color-scheme`` plus
+the freedesktop appearance portal drive Adwaita / Adwaita-dark. Prefer-dark
+alone cannot lighten ``gtk-theme-name=Adwaita-dark``.
 
-The PDF page is not themed: cairo still paints white paper.
+The PDF page is not themed: cairo still paints white paper. Hyprland owns
+the window accent — chrome CSS does not draw a 2px frame.
 """
 
 from __future__ import annotations
@@ -21,11 +22,39 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk
 
+from .palette import (
+    REQUIRED_KEYS,
+    Palette,
+    hex_to_rgb,
+    load_palette,
+    locate_colors_toml,
+    theme_watch_paths,
+)
+
 PORTAL_NO_PREFERENCE = 0
 PORTAL_PREFER_DARK = 1
 PORTAL_PREFER_LIGHT = 2
 
 _WATCH_KEEPALIVE: list = []
+_THEME_SET_DEBOUNCE_MS = 120
+
+__all__ = [
+    "PORTAL_NO_PREFERENCE",
+    "PORTAL_PREFER_DARK",
+    "PORTAL_PREFER_LIGHT",
+    "Palette",
+    "REQUIRED_KEYS",
+    "adwaita_theme_for_scheme",
+    "color_scheme_is_dark",
+    "desk_is_light",
+    "hex_to_rgb",
+    "load_omarchy_palette",
+    "locate_colors_toml",
+    "scheme_is_dark",
+    "sync_gtk_appearance",
+    "watch_appearance",
+    "watch_theme_set",
+]
 
 
 def scheme_is_dark(
@@ -47,7 +76,7 @@ def scheme_is_dark(
 
 
 def desk_is_light(bg: tuple[float, float, float]) -> bool:
-    """Pick the editorial desk shade from actual Adwaita bg luminance."""
+    """Pick the editorial desk shade from actual background luminance."""
     return (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) >= 0.5
 
 
@@ -114,9 +143,18 @@ def color_scheme_is_dark() -> bool:
     )
 
 
-def sync_gtk_appearance() -> bool:
-    """Push desktop color-scheme into this process. Returns True if dark."""
-    dark = color_scheme_is_dark()
+def load_omarchy_palette() -> Palette | None:
+    """Resolved Omarchy palette, or None to keep Adwaita."""
+    try:
+        return load_palette()
+    except Exception:
+        return None
+
+
+def sync_gtk_appearance(*, dark: bool | None = None) -> bool:
+    """Push color-scheme (or an Omarchy palette mode) into this process."""
+    if dark is None:
+        dark = color_scheme_is_dark()
     settings = Gtk.Settings.get_default()
     if settings is None:
         return dark
@@ -128,7 +166,7 @@ def sync_gtk_appearance() -> bool:
 
 
 def watch_appearance(callback) -> None:
-    """Reload chrome when Omarchy / GNOME / the portal flips color-scheme."""
+    """Reload chrome when GNOME / the portal flips color-scheme."""
 
     def _run(*_a):
         callback()
@@ -165,3 +203,40 @@ def watch_appearance(callback) -> None:
         _WATCH_KEEPALIVE.append(proxy)
     except Exception:
         pass
+
+
+def watch_theme_set(callback) -> None:
+    """Reload chrome when ``omarchy-theme-set`` swaps the theme (then the hook)."""
+
+    pending = {"src": 0}
+
+    def fire():
+        pending["src"] = 0
+        callback()
+        return False
+
+    def on_changed(*_a):
+        src = pending["src"]
+        if src:
+            GLib.source_remove(src)
+        pending["src"] = GLib.timeout_add(_THEME_SET_DEBOUNCE_MS, fire)
+
+    seen: set[str] = set()
+    try:
+        flags = Gio.FileMonitorFlags.WATCH_MOVES
+    except AttributeError:
+        flags = Gio.FileMonitorFlags.NONE
+
+    for path in theme_watch_paths():
+        if not path.exists():
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            monitor = Gio.File.new_for_path(str(path)).monitor(flags, None)
+            monitor.connect("changed", on_changed)
+            _WATCH_KEEPALIVE.append(monitor)
+        except Exception:
+            continue

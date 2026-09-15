@@ -1803,14 +1803,22 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 return
             applying["on"] = True
             try:
-                chrome_theme.sync_gtk_appearance()
-                _bg, _fg = _theme_colors(win)
+                pal = chrome_theme.load_omarchy_palette()
+                if pal is not None:
+                    chrome_theme.sync_gtk_appearance(dark=pal.is_dark)
+                    _bg = chrome_theme.hex_to_rgb(pal.get("background"))
+                    _fg = chrome_theme.hex_to_rgb(pal.get("foreground"))
+                    prefix = pal.css_defines()
+                else:
+                    chrome_theme.sync_gtk_appearance()
+                    _bg, _fg = _theme_colors(win)
+                    prefix = b""
                 _light = chrome_theme.desk_is_light(_bg)
                 chrome["desk"] = _desk_rgb(_bg, _light)
                 chrome["fg"] = _fg
                 chrome["light"] = _light
                 chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
-                blob = _editorial_css(_light)
+                blob = prefix + _editorial_css(_light)
                 if show_window_controls:
                     blob += WINDOW_CONTROLS_CSS
                 css.load_from_data(blob)
@@ -1830,6 +1838,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             Gtk.STYLE_PROVIDER_PRIORITY_USER,
         )
         chrome_theme.watch_appearance(apply_chrome)
+        chrome_theme.watch_theme_set(apply_chrome)
         win.connect("realize", apply_chrome)
 
         toolbar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
