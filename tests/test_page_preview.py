@@ -1,6 +1,6 @@
 """Unit tests for scratch page-preview state."""
 
-from omepreview.page_preview import PagePreviewState
+from omepreview.page_preview import PagePreviewState, index_after_move
 from tests.data.make_docs import make_labeled_pdf
 
 
@@ -40,3 +40,30 @@ def test_preview_illegal_move_is_noop(tmp_path):
     labels = [doc[n].get_text("text").strip().split()[-1] for n in range(doc.page_count)]
     doc.close()
     assert labels == ["1", "5", "6", "2", "3", "4"]
+
+
+def test_index_after_move_page_4_in_front_of_page_2(tmp_path):
+    """Drop page 4 in front of page 2 → dest index 1; that page is PAGE 4."""
+    assert index_after_move(4, [4], after=1) == 1
+    assert index_after_move(4, [4], after=0) == 0
+    assert index_after_move(4, [3, 4], after=1) == 1
+    pdf = make_labeled_pdf(tmp_path / "four.pdf", page_count=4)
+    state = PagePreviewState(pdf)
+    n = state.page_count()
+    pages = [4]
+    after = 1
+    dest = index_after_move(n, pages, after)
+    state.add_move_pages(pages, after)
+    doc = state.open_view()
+    labels = [doc[i].get_text("text").strip().split()[-1] for i in range(doc.page_count)]
+    doc.close()
+    assert labels == ["1", "4", "2", "3"]
+    assert dest == 1
+    assert labels[dest] == "4"
+
+
+def test_index_after_move_matches_engine_order():
+    # Move [5, 6] after 1 → 1,5,6,2,3,4 — first moved page lands at index 1.
+    assert index_after_move(6, [5, 6], after=1) == 1
+    # Move [2] after last remaining page 6 → 1,3,4,5,6,2.
+    assert index_after_move(6, [2], after=6) == 5

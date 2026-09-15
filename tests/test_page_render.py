@@ -5,7 +5,7 @@ from pathlib import Path
 import pymupdf
 
 from omepreview import engine
-from omepreview.gui_pages import insertion_marker_y
+from omepreview.gui_pages import clear_thumb_dragging, insertion_marker_y
 from omepreview.render import page_view_matrix, raster_page
 from tests.data.make_docs import make_labeled_pdf
 
@@ -64,3 +64,40 @@ def test_gui_files_do_not_prerotate_page_rotation():
 def test_insertion_marker_is_in_front_of_target():
     assert insertion_marker_y(40, 400) == 40
     assert insertion_marker_y(None, 400) == 400
+
+
+def test_clear_thumb_dragging_skips_bool():
+    """GTK drag-end passes delete_data: bool. Must not traceback."""
+    clear_thumb_dragging(True)
+    clear_thumb_dragging(False)
+    clear_thumb_dragging(None)
+
+    class _Row:
+        def __init__(self):
+            self.removed = []
+
+        def remove_css_class(self, name):
+            self.removed.append(name)
+
+    row = _Row()
+    clear_thumb_dragging(row)
+    assert row.removed == ["omapdf-thumb-dragging"]
+
+
+def test_drag_end_signature_keeps_widget_when_gtk_passes_bool():
+    """Simulate Gtk.DragSource drag-end (source, drag, delete_data)."""
+    class _Row:
+        def __init__(self):
+            self.removed = []
+
+        def remove_css_class(self, name):
+            self.removed.append(name)
+
+    thumb_row = _Row()
+
+    def on_drag_end(_src, _drag, _delete_data=False, *, thumb_row=thumb_row):
+        clear_thumb_dragging(thumb_row)
+
+    on_drag_end(object(), object(), True)
+    on_drag_end(object(), object(), False)
+    assert thumb_row.removed == ["omapdf-thumb-dragging", "omapdf-thumb-dragging"]

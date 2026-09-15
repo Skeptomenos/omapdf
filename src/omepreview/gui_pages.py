@@ -22,7 +22,7 @@ from .page_clipboard import (
     write_temp_pdf,
 )
 from .ops import OpError
-from .page_preview import PagePreviewState
+from .page_preview import PagePreviewState, index_after_move
 from .popover_safe import popover_try_popup
 from .render import raster_page
 
@@ -32,6 +32,25 @@ def insertion_marker_y(target_row_y: int | None, last_row_bottom: int) -> int:
     if target_row_y is None:
         return last_row_bottom
     return target_row_y
+
+
+def clear_thumb_dragging(thumb_row) -> None:
+    """Drop the dragging dim class. No-op if *thumb_row* is not a widget.
+
+    Gtk.DragSource ``drag-end`` is ``(source, drag, delete_data: bool)``. A
+    handler written as ``def on_drag_end(_src, _drag, row=row)`` binds that
+    bool onto ``row`` and crashes: ``'bool' object has no attribute
+    'remove_css_class'``. Callers must capture the widget with a keyword-only
+    default (``*, thumb_row=row``) so GTK's third positional arg stays
+    ``delete_data``.
+    """
+    remover = getattr(thumb_row, "remove_css_class", None)
+    if not callable(remover):
+        return
+    try:
+        remover("omapdf-thumb-dragging")
+    except Exception:
+        pass
 
 
 def build_page_sidebar(
@@ -96,12 +115,20 @@ def build_page_sidebar(
         for n in range(doc.page_count):
                 pg = doc[n]
                 thumb_w = 84
+                thumb_h = int(pg.rect.height * thumb_w / pg.rect.width)
                 scale = (thumb_w * 2) / pg.rect.width
                 pix = raster_page(pg, scale)
                 texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
+                # Drag ghost must match sidebar CSS size. The 2× texture is
+                # for the in-rail Picture; using it as set_icon paints a large overlay.
+                icon_scale = thumb_w / pg.rect.width
+                icon_pix = raster_page(pg, icon_scale)
+                drag_tex = Gdk.Texture.new_from_bytes(
+                    GLib.Bytes.new(icon_pix.tobytes("png"))
+                )
                 pic = Gtk.Picture.new_for_paintable(texture)
                 pic.add_css_class("omapdf-thumb")
-                pic.set_size_request(thumb_w, int(pg.rect.height * thumb_w / pg.rect.width))
+                pic.set_size_request(thumb_w, thumb_h)
                 pic.set_content_fit(Gtk.ContentFit.FILL)
                 cell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
                 cell.set_margin_top(8)
@@ -167,15 +194,29 @@ def build_page_sidebar(
                         )
                     return Gdk.ContentProvider.new_for_value(str(idx))
 
-                def on_drag_begin(src, _drag, row=row, tex=texture):
-                    row.add_css_class("omapdf-thumb-dragging")
+                def on_drag_begin(
+                    src,
+                    _drag,
+                    *,
+                    thumb_row=row,
+                    drag_tex=drag_tex,
+                    hot_x=thumb_w // 2,
+                    hot_y=thumb_h // 2,
+                ):
+                    adder = getattr(thumb_row, "add_css_class", None)
+                    if callable(adder):
+                        try:
+                            adder("omapdf-thumb-dragging")
+                        except Exception:
+                            pass
                     try:
-                        src.set_icon(tex, thumb_w // 2, 36)
+                        src.set_icon(drag_tex, hot_x, hot_y)
                     except Exception:
                         pass
 
-                def on_drag_end(_src, _drag, row=row):
-                    row.remove_css_class("omapdf-thumb-dragging")
+                def on_drag_end(_src, _drag, _delete_data=False, *, thumb_row=row):
+                    # GTK4: third arg is delete_data (bool), not the row widget.
+                    clear_thumb_dragging(thumb_row)
                     hide_drop_slot()
 
                 drag.connect("drag-begin", on_drag_begin)
@@ -213,9 +254,36 @@ def build_page_sidebar(
         """Map sidebar row index to move_pages ``after`` (0 = beginning)."""
         return 0 if row_index <= 0 else row_index
 
+    def scroll_thumb_into_view(idx: int) -> bool:
+        """Scroll the thumb rail so row ``idx`` is visible after a rebuild."""
+        if idx < 0 or idx >= len(row_widgets):
+            return False
+        row = row_widgets[idx]
+        scroll = None
+        widget = row
+        while widget is not None:
+            if isinstance(widget, Gtk.ScrolledWindow):
+                scroll = widget
+                break
+            widget = widget.get_parent()
+        if scroll is None:
+            return False
+        adj = scroll.get_vadjustment()
+        alloc = row.get_allocation()
+        y = int(alloc.y)
+        h = int(alloc.height)
+        vis_top = adj.get_value()
+        vis_bot = vis_top + adj.get_page_size()
+        if y < vis_top:
+            adj.set_value(y)
+        elif y + h > vis_bot:
+            adj.set_value(max(adj.get_lower(), y + h - adj.get_page_size()))
+        return False
+
     drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
 
     def on_reorder_drop(_t, value, _x, y):
+        nonlocal anchor
         try:
             src_idx = int(value)
         except (TypeError, ValueError):
@@ -230,15 +298,22 @@ def build_page_sidebar(
         # raise "after page N is among the pages being moved".
         if after != 0 and after in pages:
             return False
+        n = pages_doc().page_count
         ed.checkpoint()
         try:
             preview.move_selection_to_after(pages, after)
         except OpError:
             return False
+        dest = index_after_move(n, pages, after)
+        ed.page_no = dest
+        selected.clear()
+        selected.update(range(dest, dest + len(pages)))
+        anchor = dest
         touch_preview()
         on_change()
         toast(f"Moved page(s) {pages} after {after}")
         hide_drop_slot()
+        GLib.idle_add(scroll_thumb_into_view, dest)
         return True
 
     def on_reorder_enter(_t, x, y):
