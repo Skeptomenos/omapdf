@@ -17,6 +17,7 @@ import pymupdf
 
 from . import ops as ops_mod
 from . import signature as sig_store
+from .fs_privacy import chmod_private_file
 from .ops import OpError
 
 
@@ -432,6 +433,7 @@ def _apply_extract_pages(doc, op, *, dry_run: bool) -> dict:
             out_doc.insert_pdf(doc, from_page=p - 1, to_page=p - 1)
         dest.parent.mkdir(parents=True, exist_ok=True)
         out_doc.save(str(dest), garbage=3, deflate=True)
+        chmod_private_file(dest)
     finally:
         out_doc.close()
     return {"pages": pages, "to": str(dest)}
@@ -474,30 +476,24 @@ _APPLIERS = {
 
 def _save(doc: pymupdf.Document, source: Path, output: Path) -> None:
     # PyMuPDF cannot do a full (garbage-collected) save over the file it has
-    # open, so route same-file saves through a sibling temp file.
-    if output.resolve() == source.resolve():
-        fd, tmp = tempfile.mkstemp(dir=str(output.parent), suffix=".pdf")
-        os.close(fd)
-        try:
-            doc.save(tmp, garbage=3, deflate=True)
+    # open, so route same-file saves through a sibling temp file. chmod 0600
+    # after save: Document.save(path) follows umask (typically 0644).
+    fd, tmp = tempfile.mkstemp(dir=str(output.parent), suffix=".pdf")
+    os.close(fd)
+    try:
+        doc.save(tmp, garbage=3, deflate=True)
+        chmod_private_file(tmp)
+        doc.close()
+        os.replace(tmp, output)
+        chmod_private_file(output)
+    except BaseException:
+        if not doc.is_closed:
             doc.close()
-            os.replace(tmp, output)
-        except BaseException:
+        try:
             os.unlink(tmp)
-            raise
-    else:
-        fd, tmp = tempfile.mkstemp(dir=str(output.parent), suffix=".pdf")
-        os.close(fd)
-        try:
-            doc.save(tmp, garbage=3, deflate=True)
-            doc.close()
-            os.replace(tmp, output)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        except OSError:
+            pass
+        raise
 
 
 def _order_ops(ops: list[dict]) -> list[dict]:
@@ -555,11 +551,25 @@ def apply(
     return {"output": str(output), "applied": applied}
 
 
+def _pages_with_redact_annots(doc: pymupdf.Document) -> list[int]:
+    """1-based pages that still carry unapplied PDF redaction annotations."""
+    pages: list[int] = []
+    for i in range(doc.page_count):
+        if _redact_annots(doc[i]):
+            pages.append(i + 1)
+    return pages
+
+
 def flatten(pdf: str | Path, output: str | Path | None = None) -> dict:
     """Bake annotations and form fields into page content.
 
     Use before sending to recipients whose viewers mishandle annotations, or
     to make filled forms and placed marks non-editable.
+
+    Refuses when any page still has a PDF redaction annotation: baking the
+    black appearance does not apply the redaction, so the underlying text
+    stays extractable. Apply a reviewed ``redact`` (``apply_now``) or delete
+    the annotations first. Flatten never silently ``apply_redactions()``.
     """
     pdf = Path(pdf)
     if not pdf.is_file():
@@ -567,6 +577,16 @@ def flatten(pdf: str | Path, output: str | Path | None = None) -> dict:
     output = Path(output) if output else pdf
     doc = pymupdf.open(str(pdf))
     try:
+        pending_pages = _pages_with_redact_annots(doc)
+        if pending_pages:
+            listed = ", ".join(str(p) for p in pending_pages)
+            raise OpError(
+                f"flatten refused: pending PDF redaction annotations on page(s) "
+                f"{listed}. Apply those redactions with a reviewed redact "
+                "(apply_now) or delete the annotations first. Flattening would "
+                "bake the redaction appearance while leaving the underlying "
+                "text extractable."
+            )
         doc.bake(annots=True, widgets=True)
         _save(doc, pdf, output)
     except BaseException:

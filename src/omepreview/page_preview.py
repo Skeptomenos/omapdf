@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pymupdf
 
 from . import engine
+from .fs_privacy import chmod_private_file, scratch_dir
 
 
 def index_after_move(page_count: int, pages: list[int], after: int) -> int:
@@ -30,6 +32,95 @@ def index_after_move(page_count: int, pages: list[int], after: int) -> int:
     return new_order.index(pages[0])
 
 
+def apply_identity_op(
+    identities: list[int], op: dict, next_id: int
+) -> tuple[list[int], int]:
+    """Return the page-id list after one surgery op. Rotate/crop are no-ops."""
+    ids = list(identities)
+    kind = op.get("op")
+    if kind == "delete_pages":
+        for p in sorted(set(op["pages"]), reverse=True):
+            idx = p - 1
+            if 0 <= idx < len(ids):
+                del ids[idx]
+    elif kind == "insert_pages":
+        n = engine._insert_count(op)
+        after = int(op["after"])
+        fresh = list(range(next_id, next_id + n))
+        ids[after:after] = fresh
+        next_id += n
+    elif kind == "move_pages":
+        pages_to_move = list(op["pages"])
+        after = int(op["after"])
+        n = len(ids)
+        move_set = set(pages_to_move)
+        remaining = [p for p in range(1, n + 1) if p not in move_set]
+        if after == 0:
+            new_order = list(pages_to_move) + remaining
+        else:
+            insert_at = remaining.index(after) + 1
+            new_order = remaining[:insert_at] + list(pages_to_move) + remaining[insert_at:]
+        ids = [ids[p - 1] for p in new_order]
+    return ids, next_id
+
+
+def identities_from_ops(original_count: int, ops: list[dict]) -> list[int]:
+    ids = list(range(original_count))
+    next_id = original_count
+    for op in ops:
+        ids, next_id = apply_identity_op(ids, op, next_id)
+    return ids
+
+
+def remap_page_index(page_0: int, old_ids: list[int], new_ids: list[int]) -> int | None:
+    """New 0-based index for a page, or None if that page was deleted."""
+    if page_0 < 0 or page_0 >= len(old_ids):
+        return None
+    sid = old_ids[page_0]
+    try:
+        return new_ids.index(sid)
+    except ValueError:
+        return None
+
+
+def rebind_items_to_identities(
+    items: list[dict], old_ids: list[int], new_ids: list[int]
+) -> int:
+    """Rewrite 0-based ``page`` keys so markup stays on the same logical page.
+
+    Items whose page was deleted are removed (not silently retargeted).
+    Remaining dict objects are kept so editor selection identity is preserved.
+    Returns the number of dropped items.
+    """
+    kept: list[dict] = []
+    dropped = 0
+    for it in items:
+        if "page" not in it:
+            kept.append(it)
+            continue
+        try:
+            page_0 = int(it["page"])
+        except (TypeError, ValueError):
+            kept.append(it)
+            continue
+        new_page = remap_page_index(page_0, old_ids, new_ids)
+        if new_page is None:
+            dropped += 1
+            continue
+        it["page"] = new_page
+        kept.append(it)
+    items[:] = kept
+    return dropped
+
+
+def _pdf_page_count(path: str) -> int:
+    doc = pymupdf.open(path)
+    try:
+        return doc.page_count
+    finally:
+        doc.close()
+
+
 class PagePreviewState:
     """Tracks page-op ghosts and a scratch PDF that reflects them."""
 
@@ -39,11 +130,22 @@ class PagePreviewState:
         self.scratch_path: str | None = None
         self.inserted_pages: set[int] = set()  # 1-based pages in scratch view
         self._temp_sources: list[Path] = []
+        self._original_count = _pdf_page_count(self.source)
+        self.on_identities_changed: Callable[[list[int], list[int]], None] | None = None
+
+    def identities(self) -> list[int]:
+        """Stable ids for the current page order (index 0 = first visible page)."""
+        return identities_from_ops(self._original_count, self.page_ops)
 
     def retarget(self, source: str | Path):
         """Point the preview at a different file (e.g. after save-as-copy)."""
-        self.clear()
+        self._drop_scratch()
+        self._drop_temp_sources()
+        self.page_ops.clear()
+        self.inserted_pages.clear()
+        self.scratch_path = None
         self.source = str(Path(source).resolve())
+        self._original_count = _pdf_page_count(self.source)
 
     def has_changes(self) -> bool:
         return bool(self.page_ops)
@@ -53,6 +155,8 @@ class PagePreviewState:
         self._drop_scratch()
         self.inserted_pages.clear()
         self._drop_temp_sources()
+        if os.path.isfile(self.source):
+            self._original_count = _pdf_page_count(self.source)
 
     def _drop_scratch(self):
         if self.scratch_path and os.path.exists(self.scratch_path):
@@ -75,11 +179,13 @@ class PagePreviewState:
         self.inserted_pages.clear()
         if not self.page_ops:
             return pymupdf.open(self.source)
-        fd, path = tempfile.mkstemp(suffix=".pdf")
+        fd, path = tempfile.mkstemp(suffix=".pdf", dir=str(scratch_dir()))
         os.close(fd)
         shutil.copy(self.source, path)
+        chmod_private_file(path)
         for op in self.page_ops:
             engine.apply(path, [op], output=path)
+            chmod_private_file(path)
         self.scratch_path = path
         doc = pymupdf.open(path)
         self.inserted_pages = self._mark_inserted_pages(doc)
@@ -100,8 +206,17 @@ class PagePreviewState:
             doc.close()
 
     def append_op(self, op: dict):
+        old_ids = self.identities()
         self.page_ops.append(op)
-        self.rebuild()
+        try:
+            self.rebuild()
+        except BaseException:
+            self.page_ops.pop()
+            raise
+        new_ids = self.identities()
+        cb = self.on_identities_changed
+        if cb is not None:
+            cb(old_ids, new_ids)
 
     def add_delete_pages(self, pages: list[int]):
         self.append_op({"op": "delete_pages", "pages": sorted(set(pages))})

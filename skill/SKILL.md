@@ -112,7 +112,9 @@ show-in-folder).
   user may want to redo; edit in place only for additive annotation the user
   asked for on that file.
 - **Finish for sending:** offer `omepreview flatten out.pdf -o final.pdf` when
-  the copy is going to someone else; keep the unflattened version.
+  the copy is going to someone else; keep the unflattened version. Flatten
+  refuses if the file still has pending PDF redaction annotations — apply a
+  reviewed `redact` first; do not treat flatten as apply-redactions.
 - Password-protected PDFs are refused — ask the user to decrypt.
 - No signature saved? `omepreview sig draw` opens the trackpad recorder
   (Space / finger-on-pad absolute mapping / Enter → SVG). Never fabricate a signature, never
