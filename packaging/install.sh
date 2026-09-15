@@ -6,8 +6,10 @@
 set -euo pipefail
 
 VERSION="0.1.0"
-TARBALL_URL="https://github.com/Skeptomenos/omapreview/archive/refs/tags/v${VERSION}.tar.gz"
-TARBALL_SHA256="67e1aa28845b4b4e016a2d6b38a065d9c501abef53f482330c819ef0068fb8bc"
+# Tag archive is the original v0.1.0 tree (no empty launch). Visitors get this
+# release-asset snapshot instead so Super+Space opens an empty editor.
+TARBALL_URL="https://github.com/Skeptomenos/omapreview/releases/download/v${VERSION}/omapreview-0.1.0-src.tar.gz"
+TARBALL_SHA256="87c20481548fda1d0e0240dbd8d3c93312f3d0b8de33a7fee13672bff120e90d"
 PREFIX="${HOME}/.local/share/omapreview"
 BIN_DIR="${HOME}/.local/bin"
 APP_DIR="${HOME}/.local/share/applications"

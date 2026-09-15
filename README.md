@@ -66,7 +66,9 @@ is still `omepreview`. AUR registration is closed; this is not in extra/communit
 curl -fsSL https://github.com/Skeptomenos/omapreview/releases/download/v0.1.0/install.sh | bash
 ```
 
-That fetches the **v0.1.0** source tarball, installs pacman deps (`gtk4`,
+That fetches the **v0.1.0** empty-launch source snapshot
+(`omapreview-0.1.0-src.tar.gz` on the release; not the original tag archive),
+installs pacman deps (`gtk4`,
 `python`, `python-gobject`, `python-cairo`, `python-pymupdf`), puts
 `omapreview` on `~/.local/bin`, and writes
 `~/.local/share/applications/omapreview.desktop`. Super+Space, type

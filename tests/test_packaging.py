@@ -55,7 +55,8 @@ def test_visitor_install_script_uses_tarball_not_clone():
     text = (ROOT / "packaging/install.sh").read_text(encoding="utf-8")
     assert "git clone http" not in text
     assert "git clone git" not in text
-    assert "archive/refs/tags/v${VERSION}.tar.gz" in text or "archive/" in text
+    assert "releases/download/v${VERSION}/omapreview-0.1.0-src.tar.gz" in text
+    assert "87c20481548fda1d0e0240dbd8d3c93312f3d0b8de33a7fee13672bff120e90d" in text
     assert "python-pymupdf" in text
     assert "python-gobject" in text
     assert "python-cairo" in text
