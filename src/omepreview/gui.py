@@ -224,14 +224,19 @@ def _draw_folio(
     PangoCairo.show_layout(ctx, layout)
 
 
-def _editorial_css(light: bool) -> bytes:
+def _editorial_css(light: bool, *, shade_desk: bool = True) -> bytes:
     desk_factor = "0.95" if light else "0.62"
     thumb_muted = "0.6" if light else "0.72"
+    if shade_desk:
+        desk_line = f"@define-color omapdf_desk shade(@theme_bg_color, {desk_factor});"
+    else:
+        desk_line = "@define-color omapdf_desk @theme_bg_color;"
     return f"""
-@define-color omapdf_desk shade(@theme_bg_color, {desk_factor});
+{desk_line}
 
 window.omapdf-editor {{
   background: @omapdf_desk;
+  background-color: @omapdf_desk;
   color: @theme_fg_color;
   border: none;
   outline: none;
@@ -239,22 +244,33 @@ window.omapdf-editor {{
 }}
 window.omapdf-editor, scrolledwindow.omapdf-thumb-rail, listbox.omapdf-thumbs {{
   background: @omapdf_desk;
+  background-color: @omapdf_desk;
   color: @theme_fg_color;
 }}
-scrolledwindow.omapdf-page-canvas {{
+scrolledwindow.omapdf-thumb-rail > viewport,
+scrolledwindow.omapdf-thumb-rail viewport,
+scrolledwindow.omapdf-page-canvas,
+scrolledwindow.omapdf-page-canvas > viewport,
+scrolledwindow.omapdf-page-canvas viewport,
+listbox.omapdf-thumbs > row {{
   background: @omapdf_desk;
+  background-color: @omapdf_desk;
+  color: @theme_fg_color;
 }}
 
 popover.background,
 popover.background > contents,
 popover.menu,
-popover.menu > contents {{
+popover.menu > contents,
+popover contents {{
   background: @theme_bg_color;
+  background-color: @theme_bg_color;
   color: @theme_fg_color;
 }}
 
 box.omapdf-overlay-toolbar {{
   color: @theme_fg_color;
+  background-color: transparent;
   background-image: linear-gradient(to right,
     alpha(@omapdf_desk, 0), alpha(@omapdf_desk, 0.94) 10px, alpha(@omapdf_desk, 0.94));
   border: none;
@@ -1811,7 +1827,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     _fg = chrome_theme.hex_to_rgb(pal.get("foreground"))
                     prefix = pal.css_defines()
                     _light = chrome_theme.desk_is_light(_bg)
-                    blob = prefix + _editorial_css(_light)
+                    blob = prefix + _editorial_css(_light, shade_desk=False)
+                    desk = _bg
                 else:
                     dark = chrome_theme.sync_gtk_appearance()
                     _light = not dark
@@ -1823,7 +1840,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 if pal is None:
                     _bg, _fg = _theme_colors(win)
                     _light = chrome_theme.desk_is_light(_bg)
-                chrome["desk"] = _desk_rgb(_bg, _light)
+                    desk = _desk_rgb(_bg, _light)
+                chrome["desk"] = desk
                 chrome["fg"] = _fg
                 chrome["light"] = _light
                 chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
@@ -1836,7 +1854,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         apply_chrome()
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER
         )
         rail_css.load_from_data(_overlay_rail_css())
         Gtk.StyleContext.add_provider_for_display(

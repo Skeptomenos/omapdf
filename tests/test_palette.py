@@ -16,6 +16,8 @@ from omepreview.palette import (
 
 DATA = Path(__file__).resolve().parent / "data"
 TOKYO = DATA / "tokyo-night-colors.toml"
+TEAL = DATA / "teal-cyan-colors.toml"
+ROSE = DATA / "rose-palette-colors.toml"
 
 MINIMAL = """\
 accent = "#7aa2f7"
@@ -178,6 +180,8 @@ def test_css_defines_full_palette_atomically():
     blob = pal.css_defines().decode()
     assert blob.count("@define-color theme_bg_color") == 1
     assert "@define-color theme_bg_color #1a1b26;" in blob
+    assert "@define-color theme_base_color #1a1b26;" in blob
+    assert "@define-color theme_text_color #a9b1d6;" in blob
     assert "@define-color theme_fg_color #a9b1d6;" in blob
     assert "@define-color theme_selected_bg_color #7aa2f7;" in blob
     assert "@define-color accent_color #7aa2f7;" in blob
@@ -188,6 +192,23 @@ def test_css_defines_full_palette_atomically():
     assert "border: 2px" not in blob
     rgb = hex_to_rgb(pal.get("background"))
     assert rgb[0] == 0x1A / 255.0
+
+
+def test_teal_cyan_fixture_is_not_adwaita_gray():
+    pal = load_palette(path=TEAL)
+    assert pal is not None
+    assert pal.get("background") == "#0c2422"
+    assert pal.get("accent") == "#2ee6d6"
+    assert pal.get("cyan") == "#2ee6d6"
+    r, g, b = hex_to_rgb(pal.get("background"))
+    assert g > r and b > r
+    blob = pal.css_defines().decode()
+    assert "@define-color theme_bg_color #0c2422;" in blob
+    assert "@define-color theme_base_color #0c2422;" in blob
+    rose = load_palette(path=ROSE)
+    assert rose is not None
+    assert rose.get("background") == "#241018"
+    assert rose.get("background") != pal.get("background")
 
 
 def test_theme_watch_paths_include_current_parent(tmp_path):

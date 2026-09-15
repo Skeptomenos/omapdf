@@ -48,10 +48,15 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     apply = src[src.index("def apply_chrome") : src.index("chrome_theme.watch_appearance")]
     assert "load_omarchy_palette" in apply
     assert "css_defines" in apply
+    assert "shade_desk=False" in apply
+    assert "desk = _bg" in apply
     assert "blob = prefix + _editorial_css" in apply
     assert "blob += WINDOW_CONTROLS_CSS" in apply
     assert "css.load_from_data(blob)" in apply
     assert "css.load_from_data(WINDOW_CONTROLS_CSS)" not in src
+    assert "STYLE_PROVIDER_PRIORITY_USER" in src[src.index("def apply_chrome") : src.index("chrome_theme.watch_appearance")]
+    assert "viewport" in body
+    assert "background-color: @omapdf_desk" in body
     assert "sync_gtk_appearance" in apply
     assert "desk_is_light" in apply
     assert "applying[\"again\"]" in apply
