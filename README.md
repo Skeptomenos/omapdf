@@ -58,18 +58,21 @@ Forked from [omapdf](https://github.com/pbergin11/omapdf). omepreview is its own
 ## Install
 
 The user-facing command and launcher name is **omapreview**. The Python package
-is still `omepreview`.
+is still `omepreview`. AUR registration is closed; this is not in extra/community.
 
-**Arch / Omarchy** (after the AUR package is published):
+**Arch / Omarchy** (no clone):
 
 ```bash
-yay -S omapreview
+curl -fsSL https://github.com/Skeptomenos/omapreview/releases/download/v0.1.0/install.sh | bash
 ```
 
-That installs `/usr/bin/omapreview` and `omapreview.desktop`. Super+Space,
-type `omapreview`.
+That fetches the **v0.1.0** source tarball, installs pacman deps (`gtk4`,
+`python`, `python-gobject`, `python-cairo`, `python-pymupdf`), puts
+`omapreview` on `~/.local/bin`, and writes
+`~/.local/share/applications/omapreview.desktop`. Super+Space, type
+`omapreview`.
 
-**Contributors** (git checkout, not the visitor path):
+**Contributors** (git checkout):
 
 ```bash
 git clone https://github.com/Skeptomenos/omapreview.git

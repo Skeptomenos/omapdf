@@ -51,6 +51,19 @@ def test_pkgbuild_installs_omapreview_desktop_from_omapreview_repo():
     assert 'cd "$pkgname-$pkgver"' in text
 
 
+def test_visitor_install_script_uses_tarball_not_clone():
+    text = (ROOT / "packaging/install.sh").read_text(encoding="utf-8")
+    assert "git clone http" not in text
+    assert "git clone git" not in text
+    assert "archive/refs/tags/v${VERSION}.tar.gz" in text
+    assert "python-pymupdf" in text
+    assert "python-gobject" in text
+    assert "python-cairo" in text
+    assert "gtk4" in text
+    assert "omapreview.desktop" in text
+    assert "${VENV}/bin/omapreview" in text
+
+
 def test_edit_accepts_a_missing_pdf_for_the_launcher():
     args = build_parser().parse_args(["edit"])
     assert args.pdf is None
