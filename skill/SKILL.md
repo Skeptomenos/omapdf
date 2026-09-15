@@ -111,6 +111,11 @@ show-in-folder).
 - **Keep originals.** Use `-o` for signing, flattening, and anything the
   user may want to redo; edit in place only for additive annotation the user
   asked for on that file.
+- **Redact means destroy.** Region redact removes page text in the rectangle
+  **and** intersecting sticky notes/replies, FreeText, file attachments, and
+  form values. Unsupported intersecting annot types fail closed — do not
+  report a successful redact while a payload remains. Ink/black boxes are
+  not redact.
 - **Finish for sending:** offer `omepreview flatten out.pdf -o final.pdf` when
   the copy is going to someone else; keep the unflattened version. Flatten
   refuses if the file still has pending PDF redaction annotations — apply a

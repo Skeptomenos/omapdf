@@ -16,6 +16,7 @@ from pathlib import Path
 import pymupdf
 
 from . import ops as ops_mod
+from . import redact_scope
 from . import signature as sig_store
 from .fs_privacy import chmod_private_file
 from .ops import OpError
@@ -320,25 +321,33 @@ def _apply_insert_pages(doc, op) -> dict:
         src_doc.close()
 
 
-def _text_in_rects(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> bool:
-    """True when extractable text still remains *inside* a redaction rect.
-
-    Uses the clip, not block-intersection: a word-sized rect on a longer
-    line must not fail verify just because neighboring words still exist.
-    """
-    for rect in rects:
-        snippet = page.get_textbox(rect).strip()
-        if snippet:
-            return True
-    return False
-
-
 def _verify_redact(page: pymupdf.Page, match: str | None, rects: list[pymupdf.Rect]) -> dict:
-    if match is not None:
-        still = match in page.get_text()
-    else:
-        still = _text_in_rects(page, rects)
-    return {"text_still_present": still}
+    still = redact_scope.text_still_present(page, match, rects)
+    leftovers = redact_scope.intersecting_payloads(page, rects)
+    return {
+        "text_still_present": still,
+        "payloads_still_present": leftovers,
+    }
+
+
+def _verify_redact_ops_serialized(doc: pymupdf.Document, applied: list[dict]) -> None:
+    """Reopen a garbage-collected serialization so leftover annot payloads fail closed."""
+    redact_ops = [
+        op
+        for op in applied
+        if op.get("op") == "redact"
+        and op.get("apply_now", True)
+        and op.get("applied")
+    ]
+    if not redact_ops:
+        return
+    blob = doc.tobytes(garbage=3, deflate=True)
+    probe = pymupdf.open("pdf", blob)
+    try:
+        for op in redact_ops:
+            redact_scope.verify_serialized(probe, op)
+    finally:
+        probe.close()
 
 
 def _apply_delete_annotation(doc, op, *, dry_run: bool) -> dict:
@@ -401,6 +410,8 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
                 "redaction annotation(s); apply or delete them first so this "
                 "redact does not also remove unapproved regions"
             )
+        redact_scope.fail_closed_if_unsupported(page, rects, page_no=op["page"])
+        redact_scope.strip_known_in_rects(page, rects)
 
     if not apply_now:
         for rect in rects:
@@ -417,6 +428,12 @@ def _apply_redact(doc, op, *, dry_run: bool) -> dict:
         raise OpError(
             f"redact verify failed on page {op['page']}: text still present after "
             "redaction — widen the region or check for overlapping content"
+        )
+    leftovers = verify.get("payloads_still_present") or []
+    if leftovers:
+        raise OpError(
+            f"redact verify failed on page {op['page']}: payloads still present "
+            f"in the region: {', '.join(leftovers)}"
         )
     return result
 
@@ -543,6 +560,7 @@ def apply(
         if dry_run:
             doc.close()
             return {"output": None, "applied": applied}
+        _verify_redact_ops_serialized(doc, applied)
         _save(doc, pdf, output)
     except BaseException:
         if not doc.is_closed:

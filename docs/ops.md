@@ -162,9 +162,18 @@ Writes selected pages to `to`. Does not modify the source document. Report:
 Exactly one of `match` (every occurrence on the page) or `rect`. On apply,
 PyMuPDF `add_redact_annot` + `apply_redactions()` removes matched text and
 intersecting image samples, then fills the region opaque (default black).
+The same authorized rectangle also **strips** intersecting sticky notes
+(and their replies), FreeText, file-attachment annotations, and form
+fields/values. After save, verification reopens the serialized file and
+checks object payloads as well as page text. If an intersecting annotation
+type is not in that list (stamp, ink, highlight, sound, …), redact **refuses**
+rather than reporting success while a payload remains. Annotations wholly
+outside the rectangle are left intact.
+
 `apply_now: false` adds redaction annotations as editable ghosts until a later
-apply. Report adds `rects` and `verify: { "text_still_present": false }`; if
-verify fails, the whole batch fails.
+apply. Report adds `rects` and
+`verify: { "text_still_present": false, "payloads_still_present": [] }`;
+if verify fails, the whole batch fails.
 
 The GTK editor commits the **displayed rectangle** of each ghost (never a
 fresh `search_for`), so selecting one repeated word does not redact the
