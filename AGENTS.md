@@ -21,7 +21,7 @@ Canonical playbook. `CLAUDE.md` is a symlink to this file.
 - `src/omepreview/gui.py` editor — pending ghosts in `Editor.pending`, `Editor.to_ops()` on Save; empty launch + in-app Open; rendering notes in `gui/README.md`.
 - `docs/ops.md` stable op contract, `docs/roadmap.md` status, `docs/omapdf-preview-parity-spec.md` + `docs/omapdf-preview-gap-analysis.md` page-surgery plan.
 - `tests/test_engine.py`, `skill/SKILL.md` agent playbook, `shell-plugin/omapdf.bar` bar widget, `packaging/PKGBUILD`, `packaging/install.sh`.
-- Live issue/branch notes: `index.md` (do not commit it).
+- Live issue/branch notes: `index.md` (commit when the compass changes).
 
 ## Bindings
 
@@ -36,7 +36,7 @@ Canonical playbook. `CLAUDE.md` is a symlink to this file.
 - Consequential actions default to dry-run/propose; the caller confirms — never auto-commit sign/flatten/redact.
 - GUI builds ops and Saves through the engine; no GUI-only writes — preserves human/agent parity.
 - License is AGPL-3.0-or-later — match it; prefer reimplementation with citation over copying GPL code.
-- Speak **omapreview** to users. Do not ship launcher file dialogs. Do not commit `index.md` or PII PDFs.
+- Speak **omapreview** to users. Do not ship launcher file dialogs. Do not commit PII PDFs.
 
 ## Done here
 
