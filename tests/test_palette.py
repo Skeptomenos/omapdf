@@ -4,6 +4,7 @@ from pathlib import Path
 
 from omepreview.palette import (
     REQUIRED_KEYS,
+    colors_file_signature,
     hex_to_rgb,
     load_palette,
     locate_colors_toml,
@@ -195,3 +196,13 @@ def test_theme_watch_paths_include_current_parent(tmp_path):
     joined = " ".join(p.as_posix() for p in paths)
     assert "omarchy/current" in joined
     assert "colors.toml" in joined
+
+
+def test_colors_file_signature_tracks_replace(tmp_path):
+    path = _write_theme(tmp_path, MINIMAL, state=True)
+    first = colors_file_signature(path)
+    path.write_text(MINIMAL + "\n", encoding="utf-8")
+    second = colors_file_signature(path)
+    assert first is not None and second is not None
+    assert first != second
+    assert colors_file_signature(tmp_path / "missing.toml") is None

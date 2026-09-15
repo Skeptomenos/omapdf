@@ -25,6 +25,7 @@ from gi.repository import Gio, GLib, Gtk
 from .palette import (
     REQUIRED_KEYS,
     Palette,
+    colors_file_signature,
     hex_to_rgb,
     load_palette,
     locate_colors_toml,
@@ -206,12 +207,21 @@ def watch_appearance(callback) -> None:
 
 
 def watch_theme_set(callback) -> None:
-    """Reload chrome when ``omarchy-theme-set`` swaps the theme (then the hook)."""
+    """Reload chrome when ``omarchy-theme-set`` swaps the theme (then the hook).
+
+    Omarchy replaces ``theme/`` atomically, so monitors on the old
+    ``colors.toml`` die after a swap. Re-arm on every wake, and poll the
+    file signature so in-place edits are not missed.
+    """
 
     pending = {"src": 0}
+    seen: set[str] = set()
+    last_sig = {"v": colors_file_signature(locate_colors_toml())}
 
     def fire():
         pending["src"] = 0
+        _arm_theme_monitors(seen, on_changed)
+        last_sig["v"] = colors_file_signature(locate_colors_toml())
         callback()
         return False
 
@@ -221,12 +231,22 @@ def watch_theme_set(callback) -> None:
             GLib.source_remove(src)
         pending["src"] = GLib.timeout_add(_THEME_SET_DEBOUNCE_MS, fire)
 
-    seen: set[str] = set()
+    def poll_signature():
+        sig = colors_file_signature(locate_colors_toml())
+        if sig != last_sig["v"]:
+            on_changed()
+        return True
+
+    _arm_theme_monitors(seen, on_changed)
+    GLib.timeout_add(400, poll_signature)
+    _WATCH_KEEPALIVE.append(poll_signature)
+
+
+def _arm_theme_monitors(seen: set[str], on_changed) -> None:
     try:
         flags = Gio.FileMonitorFlags.WATCH_MOVES
     except AttributeError:
         flags = Gio.FileMonitorFlags.NONE
-
     for path in theme_watch_paths():
         if not path.exists():
             continue

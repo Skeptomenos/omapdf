@@ -179,6 +179,17 @@ def locate_colors_toml(
     return None
 
 
+def colors_file_signature(path: Path | None) -> tuple | None:
+    """Identity of a ``colors.toml`` for poll-based reload (path, ino, size, mtime)."""
+    if path is None or not path.is_file():
+        return None
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (str(path), st.st_ino, st.st_size, st.st_mtime_ns)
+
+
 def theme_watch_paths(
     *,
     home: Path | None = None,

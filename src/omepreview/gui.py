@@ -1800,6 +1800,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         def apply_chrome(*_a):
             if applying["on"]:
+                applying["again"] = True
                 return
             applying["on"] = True
             try:
@@ -1826,6 +1827,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 win.queue_draw()
             finally:
                 applying["on"] = False
+                if applying.pop("again", False):
+                    GLib.idle_add(apply_chrome)
 
         apply_chrome()
         Gtk.StyleContext.add_provider_for_display(
