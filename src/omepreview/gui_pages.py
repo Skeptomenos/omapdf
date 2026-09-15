@@ -113,6 +113,8 @@ def build_page_sidebar(
         nonlocal row_widgets
         row_widgets.clear()
         side_list.remove_all()
+        if not ed.has_document():
+            return
         doc = pages_doc()
         for n in range(doc.page_count):
                 pg = doc[n]

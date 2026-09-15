@@ -70,7 +70,9 @@ That fetches the **v0.1.0** source tarball, installs pacman deps (`gtk4`,
 `python`, `python-gobject`, `python-cairo`, `python-pymupdf`), puts
 `omapreview` on `~/.local/bin`, and writes
 `~/.local/share/applications/omapreview.desktop`. Super+Space, type
-`omapreview`.
+`omapreview` — the editor opens **empty**. Open a PDF from the app
+(folder button or **Ctrl+O**). Clicking a PDF in the file manager still
+passes the path via `%f`.
 
 **Contributors** (git checkout):
 
@@ -89,6 +91,7 @@ Window-control override: `OMEPREVIEW_WINDOW_CONTROLS=1|0`
 ## Quick start
 
 ```bash
+omapreview edit                    # empty window; Open (Ctrl+O) picks a PDF
 omapreview edit document.pdf
 omapreview read document.pdf --json
 omapreview sig draw                   # Space to record; Enter saves SVG

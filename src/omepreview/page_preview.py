@@ -124,14 +124,18 @@ def _pdf_page_count(path: str) -> int:
 class PagePreviewState:
     """Tracks page-op ghosts and a scratch PDF that reflects them."""
 
-    def __init__(self, source: str | Path):
-        self.source = str(Path(source).resolve())
+    def __init__(self, source: str | Path | None = None):
         self.page_ops: list[dict] = []
         self.scratch_path: str | None = None
         self.inserted_pages: set[int] = set()  # 1-based pages in scratch view
         self._temp_sources: list[Path] = []
-        self._original_count = _pdf_page_count(self.source)
         self.on_identities_changed: Callable[[list[int], list[int]], None] | None = None
+        if source is None:
+            self.source = ""
+            self._original_count = 0
+        else:
+            self.source = str(Path(source).resolve())
+            self._original_count = _pdf_page_count(self.source)
 
     def identities(self) -> list[int]:
         """Stable ids for the current page order (index 0 = first visible page)."""
@@ -155,8 +159,10 @@ class PagePreviewState:
         self._drop_scratch()
         self.inserted_pages.clear()
         self._drop_temp_sources()
-        if os.path.isfile(self.source):
+        if self.source and os.path.isfile(self.source):
             self._original_count = _pdf_page_count(self.source)
+        elif not self.source:
+            self._original_count = 0
 
     def _drop_scratch(self):
         if self.scratch_path and os.path.exists(self.scratch_path):
@@ -177,6 +183,8 @@ class PagePreviewState:
         """Apply page_ops to a temp copy; return the scratch document."""
         self._drop_scratch()
         self.inserted_pages.clear()
+        if not self.source:
+            return pymupdf.open()
         if not self.page_ops:
             return pymupdf.open(self.source)
         fd, path = tempfile.mkstemp(suffix=".pdf", dir=str(scratch_dir()))
@@ -192,6 +200,8 @@ class PagePreviewState:
         return doc
 
     def open_view(self) -> pymupdf.Document:
+        if not self.source:
+            return pymupdf.open()
         if self.scratch_path and os.path.exists(self.scratch_path):
             return pymupdf.open(self.scratch_path)
         if self.page_ops:
@@ -199,6 +209,8 @@ class PagePreviewState:
         return pymupdf.open(self.source)
 
     def page_count(self) -> int:
+        if not self.source:
+            return 0
         doc = self.open_view()
         try:
             return doc.page_count

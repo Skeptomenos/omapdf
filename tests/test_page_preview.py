@@ -74,3 +74,15 @@ def test_index_after_move_matches_engine_order():
     assert index_after_move(6, [5, 6], after=1) == 1
     # Move [2] after last remaining page 6 → 1,3,4,5,6,2.
     assert index_after_move(6, [2], after=6) == 5
+
+
+def test_empty_preview_has_zero_pages():
+    state = PagePreviewState(None)
+    assert state.page_count() == 0
+    assert state.identities() == []
+    assert not state.has_changes()
+    doc = state.open_view()
+    try:
+        assert doc.page_count == 0
+    finally:
+        doc.close()

@@ -491,9 +491,16 @@ def _signature_surface(path: str) -> cairo.ImageSurface:
 
 
 class Editor:
-    def __init__(self, pdf: str, ops_file: str | None):
-        self.path = str(Path(pdf).resolve())
-        self.doc = pymupdf.open(self.path)
+    def __init__(self, pdf: str | None, ops_file: str | None):
+        pdf = (pdf or "").strip() or None
+        if pdf:
+            self.path = str(Path(pdf).expanduser().resolve())
+            self.doc = pymupdf.open(self.path)
+            self.page_preview = PagePreviewState(self.path)
+        else:
+            self.path = ""
+            self.doc = None
+            self.page_preview = PagePreviewState(None)
         self.page_no = 0
         self.zoom = 1.0
         self.pending: list[dict] = []
@@ -518,7 +525,6 @@ class Editor:
         self.search_term = ""
         self.search_hits: list[tuple[int, pymupdf.Rect]] = []
         self.search_pos = -1
-        self.page_preview = PagePreviewState(self.path)
         self.page_preview.on_identities_changed = self._rebind_pending_pages
         self.last_dropped_pending = 0
         self.window: Gtk.Window | None = None
@@ -526,8 +532,11 @@ class Editor:
         self.redact_free_rect = False
         self.redact_save_as_copy = True
         self.redact_modal_shown = False
-        if ops_file:
+        if ops_file and self.has_document():
             self._load_proposals(ops_file)
+
+    def has_document(self) -> bool:
+        return bool(self.path) and self.doc is not None and not self.doc.is_closed
 
     def _rebind_pending_pages(self, old_ids: list[int], new_ids: list[int]) -> None:
         """Keep ghosts and search hits on the same logical page after surgery."""
@@ -560,12 +569,16 @@ class Editor:
             self._view_doc = None
 
     def viewing_doc(self) -> pymupdf.Document:
+        if not self.has_document():
+            raise OpError("no PDF open — Open a file from the editor (Ctrl+O)")
         if self._view_doc is None:
             self._view_doc = self.page_preview.open_view()
         return self._view_doc
 
     def page_doc(self) -> pymupdf.Document:
         """Scratch PDF when page ops are pending; otherwise the live file handle."""
+        if not self.has_document():
+            raise OpError("no PDF open — Open a file from the editor (Ctrl+O)")
         if self.page_preview.has_changes():
             return self.viewing_doc()
         return self.doc
@@ -574,6 +587,8 @@ class Editor:
         return self.page_doc()[self.page_no]
 
     def page_count(self) -> int:
+        if not self.has_document():
+            return 0
         return self.page_doc().page_count
 
     def checkpoint(self):
@@ -597,7 +612,10 @@ class Editor:
         self.redo_stack.clear()
 
     def _restore_file(self, data: bytes):
-        self.doc.close()
+        if not self.path:
+            raise OpError("no PDF open — Open a file from the editor (Ctrl+O)")
+        if self.doc is not None and not self.doc.is_closed:
+            self.doc.close()
         Path(self.path).write_bytes(data)
         chmod_private_file(self.path)
         self.doc = pymupdf.open(self.path)
@@ -664,6 +682,23 @@ class Editor:
         self.doc = pymupdf.open(self.path)
         self.page_preview.retarget(self.path)
 
+    def open_path(self, path: str) -> None:
+        """Replace the session with a newly opened file (in-app Open)."""
+        self.adopt_document(path)
+        self.page_no = 0
+        self.pending.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.selected = None
+        self.search_hits = []
+        self.search_pos = -1
+        self.search_term = ""
+        self.page_surface = None
+        self.live_stroke = None
+        self.rubber = None
+        self.drag_base = None
+        self.drag_resize = None
+
     def save_pending(self) -> dict:
         """Apply ghosts through the engine. Returns the active path after save.
 
@@ -671,6 +706,8 @@ class Editor:
         an existing file) and switches the editor onto that copy so Share
         attaches the redacted bytes.
         """
+        if not self.has_document():
+            raise OpError("no PDF open — Open a file from the editor (Ctrl+O)")
         markup_ops = self.to_ops()
         page_ops = copy.deepcopy(self.page_preview.page_ops)
         if not markup_ops and not page_ops:
@@ -925,6 +962,8 @@ class Editor:
 
     def hit_widget(self, x, y):
         """Return an empty AcroForm text widget at (x, y), if any."""
+        if not self.has_document():
+            return None
         point = pymupdf.Point(x, y)
         for widget in self.page().widgets():
             if not widget.field_name or not widget.rect.contains(point):
@@ -938,6 +977,8 @@ class Editor:
 
     def hit_saved_annot(self, x, y):
         """Return the smallest saved annotation under (x, y), if any."""
+        if not self.has_document():
+            return None
         best = None
         for index, annot in enumerate(self.page().annots() or []):
             if self._annot_marked_deleted(self.page_no, index):
@@ -976,42 +1017,21 @@ class Editor:
             it["strokes"] = [[(px + dx, py + dy) for px, py in s] for s in it["strokes"]]
 
 
-def pick_pdf_path() -> str | None:
-    """Blocking file dialog for a launcher start with no PDF on the command line."""
-    chosen: dict[str, str | None] = {"path": None}
-
-    app = Gtk.Application(
-        application_id="org.omepreview.Open",
-        flags=Gio.ApplicationFlags.NON_UNIQUE,
-    )
-
-    def on_activate(_app):
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Open PDF")
-        filters = Gio.ListStore.new(Gtk.FileFilter)
-        f_pdf = Gtk.FileFilter()
-        f_pdf.set_name("PDF")
-        f_pdf.add_mime_type("application/pdf")
-        filters.append(f_pdf)
-        dialog.set_filters(filters)
-        dialog.set_default_filter(f_pdf)
-
-        def on_open(_d, result):
-            try:
-                file = dialog.open_finish(result)
-                chosen["path"] = file.get_path() if file is not None else None
-            except GLib.Error:
-                chosen["path"] = None
-            app.quit()
-
-        dialog.open(None, None, on_open)
-
-    app.connect("activate", on_activate)
-    app.run([])
-    return chosen["path"]
+def pdf_open_dialog() -> Gtk.FileDialog:
+    """In-window file picker for Open (Ctrl+O). Not used by the desktop Exec."""
+    dialog = Gtk.FileDialog()
+    dialog.set_title("Open PDF")
+    filters = Gio.ListStore.new(Gtk.FileFilter)
+    f_pdf = Gtk.FileFilter()
+    f_pdf.set_name("PDF")
+    f_pdf.add_mime_type("application/pdf")
+    filters.append(f_pdf)
+    dialog.set_filters(filters)
+    dialog.set_default_filter(f_pdf)
+    return dialog
 
 
-def run(pdf: str, ops_file: str | None = None) -> int:
+def run(pdf: str | None = None, ops_file: str | None = None) -> int:
     _sync_color_scheme()
     ed = Editor(pdf, ops_file)
     app = Gtk.Application(
@@ -1054,12 +1074,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         save_style_hook = {"fn": lambda: None}
         file_watch = {"retarget": lambda: None}
+        empty_hook = {"fn": lambda: None}
+        open_hook = {"fn": lambda: None}
 
         def refresh_title():
             dirty = ed.pending or ed.page_preview.has_changes()
             dot = " •" if dirty else ""
-            win.set_title(f"{Path(ed.path).name}{dot} — omepreview")
+            if ed.has_document():
+                win.set_title(f"{Path(ed.path).name}{dot} — omepreview")
+            else:
+                win.set_title("omapreview")
             save_style_hook["fn"]()
+            empty_hook["fn"]()
 
         def viewport_width() -> float:
             # Prefer the scroller's allocated width — hadjustment page-size can
@@ -1084,6 +1110,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             return avail
 
         def fit_page_zoom() -> float:
+            if not ed.has_document():
+                return 1.0
             page = ed.page()
             pw = page.rect.width or 595.0
             ph = page.rect.height or 842.0
@@ -1151,6 +1179,19 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 return
             ed.pinch_live_scale = 1.0
             ed.pinch_focus_area = None
+            if not ed.has_document():
+                ed.page_surface = None
+                ed.paper_px = (0, 0)
+                ed.page_origin = (0.0, 0.0)
+                view_w = max(1, int(viewport_width()))
+                view_h = max(1, int(viewport_height()))
+                area.set_content_width(view_w)
+                area.set_content_height(view_h)
+                page_label.set_text("—")
+                update_nav()
+                area.queue_draw()
+                refresh_title()
+                return
             if ed.zoom_pct is None:
                 z = fit_page_zoom()
             else:
@@ -1220,6 +1261,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     ctx.set_line_width(1.0)
                     ctx.rectangle(ox, oy, pw, ph)
                     ctx.stroke()
+            else:
+                ctx.restore()
+                return
             ctx.translate(ox, oy)
             ctx.scale(ed.zoom, ed.zoom)
             for it in ed.pending:
@@ -1600,6 +1644,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         click = Gtk.GestureClick()
 
         def on_click(_g, n_press, cx, cy):
+            if not ed.has_document():
+                open_hook["fn"]()
+                return
             px, py = to_page_point(cx, cy)
             hit_item = ed.hit(px, py)
             if ed.tool == "text":
@@ -1696,6 +1743,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 tooltip.set_text(it["text"])
                 return True
             try:
+                if not ed.has_document():
+                    return False
                 for a in ed.page().annots() or []:
                     r = a.rect
                     if r.x0 - 4 <= px <= r.x1 + 4 and r.y0 - 4 <= py <= r.y1 + 4:
@@ -1712,6 +1761,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         drag = Gtk.GestureDrag()
 
         def on_drag_begin(g, sx, sy):
+            if not ed.has_document():
+                g.set_state(Gtk.EventSequenceState.DENIED)
+                return
             if sig_drag["active"] or sig_drag["just_dropped"]:
                 g.set_state(Gtk.EventSequenceState.DENIED)
                 return
@@ -2053,6 +2105,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             _path(ctx, [(3.0, 15.2), (15.0, 15.2)])
             ctx.stroke()
 
+        def paint_open(ctx, fg):
+            _ink(ctx, fg, 1.5)
+            ctx.move_to(2.5, 6.2)
+            ctx.line_to(2.5, 14.6)
+            ctx.line_to(15.5, 14.6)
+            ctx.line_to(15.5, 7.2)
+            ctx.line_to(8.6, 7.2)
+            ctx.line_to(7.0, 5.0)
+            ctx.line_to(2.5, 5.0)
+            ctx.close_path()
+            ctx.stroke()
+
         def paint_spark(ctx, fg):
             # Four-point spark: "ask the agent".
             ctx.set_source_rgba(*fg)
@@ -2131,6 +2195,12 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         side_toggle.add_css_class("tool-icon")
         side_toggle.set_child(icon_widget(paint_sidebar))
         side_toggle.set_tooltip_text("Thumbnails sidebar (F9)")
+
+        open_btn = Gtk.Button()
+        open_btn.add_css_class("tool-slim")
+        open_btn.add_css_class("tool-icon")
+        open_btn.set_child(icon_widget(paint_open))
+        open_btn.set_tooltip_text("Open PDF (Ctrl+O)")
 
         make_tool("select", "Select — click an item, drag to move (Esc deselects, Del removes)",
                   paint_pointer)
@@ -2507,6 +2577,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         next_b.set_tooltip_text("Next page (PgDn)")
 
         def goto_page(n):
+            if ed.page_count() == 0:
+                return
             n = max(0, min(ed.page_count() - 1, n))
             if n != ed.page_no:
                 ed.page_no = n
@@ -2673,6 +2745,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def on_ask(_e):
             import subprocess as sp
 
+            if not ed.has_document():
+                toast("Open a PDF first (Ctrl+O)")
+                return
             question = ask_entry.get_text().strip() or "Review this document for me."
             popover_try_popdown(ask_pop)
             ask_entry.set_text("")
@@ -2707,6 +2782,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         )
 
         def share_target():
+            if not ed.has_document():
+                toast("Open a PDF first (Ctrl+O)")
+                return None
             reason = unsaved_export_reason(
                 ed.pending, ed.page_preview.has_changes(), action="sharing"
             )
@@ -2798,7 +2876,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         save_style_hook["fn"] = refresh_save_style
 
-        for w in (side_toggle, search_btn, ask_btn):
+        for w in (open_btn, side_toggle, search_btn, ask_btn):
             toolbar.append(w)
         rail_sep()
         for w in (
@@ -2875,6 +2953,61 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 return False
 
             toast_state["timeout"] = GLib.timeout_add(5000, hide)
+
+        def load_document(path: str):
+            try:
+                ed.open_path(path)
+            except Exception as exc:
+                toast(f"Could not open {Path(path).name}: {exc}")
+                return
+            file_watch["retarget"]()
+            sidebar_api["refresh"]()
+            if ed.page_count() > 1:
+                side_toggle.set_active(True)
+            render_page()
+            refresh_title()
+            toast(f"Opened {Path(path).name}")
+
+        def choose_open(_b=None):
+            dialog = pdf_open_dialog()
+
+            def on_open(_d, result):
+                try:
+                    chosen = dialog.open_finish(result)
+                except GLib.Error:
+                    return
+                if chosen is None:
+                    return
+                path = chosen.get_path()
+                if path:
+                    load_document(path)
+
+            dialog.open(win, None, on_open)
+
+        open_hook["fn"] = choose_open
+        open_btn.connect("clicked", choose_open)
+
+        empty_cue = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        empty_cue.set_halign(Gtk.Align.CENTER)
+        empty_cue.set_valign(Gtk.Align.CENTER)
+        empty_cue.set_can_target(True)
+        empty_title = Gtk.Label(label="No document")
+        empty_title.add_css_class("dim-label")
+        empty_open_btn = Gtk.Button(label="Open PDF")
+        empty_open_btn.add_css_class("suggested-action")
+        empty_open_btn.set_tooltip_text("Open a PDF (Ctrl+O)")
+        empty_hint = Gtk.Label(label="or press Ctrl+O")
+        empty_hint.add_css_class("dim-label")
+        empty_cue.append(empty_title)
+        empty_cue.append(empty_open_btn)
+        empty_cue.append(empty_hint)
+        empty_open_btn.connect("clicked", choose_open)
+
+        def refresh_empty_state():
+            empty_cue.set_visible(not ed.has_document())
+
+        empty_hook["fn"] = refresh_empty_state
+        refresh_empty_state()
 
         def show_redact_intro(on_done):
             if ed.redact_modal_shown:
@@ -2954,6 +3087,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         finish_redact_drag["fn"] = after_redact_drag
 
         def on_save(_b):
+            if not ed.has_document():
+                toast("Open a PDF first (Ctrl+O)")
+                return
             if not ed.pending and not ed.page_preview.has_changes():
                 toast("Nothing to save")
                 return
@@ -2990,7 +3126,9 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ctrl = state & Gdk.ModifierType.CONTROL_MASK
             shift = state & Gdk.ModifierType.SHIFT_MASK
             step = 10.0 if shift else 2.0
-            if ctrl and keyval == Gdk.KEY_s:
+            if ctrl and keyval in (Gdk.KEY_o, Gdk.KEY_O):
+                open_hook["fn"]()
+            elif ctrl and keyval == Gdk.KEY_s:
                 on_save(None)
             elif ctrl and keyval == Gdk.KEY_f:
                 search_btn.set_active(True)
@@ -3145,6 +3283,11 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         search_bar.connect_entry(search_entry)
 
         def run_search(term):
+            if not ed.has_document():
+                ed.search_hits = []
+                ed.search_pos = -1
+                toast("Open a PDF first (Ctrl+O)")
+                return
             ed.search_term = term
             doc = ed.viewing_doc()
             ed.search_hits = [
@@ -3205,6 +3348,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         )
 
         def on_scroll(ctl, _dx, dy):
+            if not ed.has_document():
+                return False
             if ctl.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
                 current = ed.zoom_pct if ed.zoom_pct else ed.zoom / (96 / 72) * 100
                 ed.zoom_pct = max(25.0, min(400.0, current - dy * 10))
@@ -3226,6 +3371,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             return compute_pinch_focus(gesture, scroller, area)
 
         def on_pinch_begin(gesture, _seq):
+            if not ed.has_document():
+                return
             if sig_drag["active"] or popover_busy():
                 return
             if pinch_state["commit_id"]:
@@ -3308,6 +3455,8 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         def on_viewport_change(_adj, _p):
             if pinch_state["start_pct"] is not None:
                 return
+            if not ed.has_document():
+                return
             if ed.zoom_pct is not None or fit_state["pending"]:
                 return
             fit_state["pending"] = True
@@ -3358,6 +3507,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         overlay.set_hexpand(True)
         overlay.add_overlay(toast_revealer)
         overlay.add_overlay(cheer_label)
+        overlay.add_overlay(empty_cue)
         overlay.add_overlay(toolbar_wrap)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.set_vexpand(True)
@@ -3373,9 +3523,6 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
         # Watch the file: when an agent (or anything else) saves changes to
         # it, refresh the view — the GUI half of the ask-the-agent loop.
-        monitor = Gio.File.new_for_path(ed.path).monitor_file(
-            Gio.FileMonitorFlags.NONE, None
-        )
 
         def on_disk_change(_m, _f, _o, event):
             if event != Gio.FileMonitorEvent.CHANGES_DONE_HINT:
@@ -3384,15 +3531,18 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                 return
 
             def reload():
-                if not Path(ed.path).is_file():
+                if not ed.has_document() or not Path(ed.path).is_file():
                     return False
                 try:
-                    ed.doc.close()
+                    if ed.doc is not None and not ed.doc.is_closed:
+                        ed.doc.close()
                     ed.doc = pymupdf.open(ed.path)
                 except Exception:
                     return False
                 ed.invalidate_view()
-                ed.page_no = min(ed.page_no, ed.page_count() - 1)
+                n_pages = ed.page_count()
+                if n_pages:
+                    ed.page_no = min(ed.page_no, n_pages - 1)
                 ed.page_preview.clear()
                 render_page()
                 if ed.pending or ed.page_preview.has_changes():
@@ -3403,19 +3553,26 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 
             GLib.timeout_add(200, reload)
 
-        monitor.connect("changed", on_disk_change)
+        def attach_monitor(path: str):
+            if not path:
+                return None
+            m = Gio.File.new_for_path(path).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            m.connect("changed", on_disk_change)
+            return m
+
+        monitor = attach_monitor(ed.path)
         watch_state = {"monitor": monitor}
 
         def retarget_watch():
             old = watch_state["monitor"]
-            try:
-                old.cancel()
-            except Exception:
-                pass
-            m = Gio.File.new_for_path(ed.path).monitor_file(
-                Gio.FileMonitorFlags.NONE, None
-            )
-            m.connect("changed", on_disk_change)
+            if old is not None:
+                try:
+                    old.cancel()
+                except Exception:
+                    pass
+            m = attach_monitor(ed.path)
             watch_state["monitor"] = m
             win._omapdf_monitor = m
 
@@ -3446,8 +3603,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
 def main(argv=None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args:
-        print("usage: python -m omepreview.gui <doc.pdf> [ops.json]", file=sys.stderr)
-        return 2
+        return run(None)
     return run(args[0], args[1] if len(args) > 1 else None)
 
 

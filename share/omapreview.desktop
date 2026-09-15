@@ -1,3 +1,9 @@
+# omapreview
+#
+# %f is omitted when the launcher starts with no file, so Exec becomes
+# `omapreview edit` and the editor opens empty. MIME open still passes a path.
+# Do not put a file picker in Exec. Open is in-app.
+
 [Desktop Entry]
 Type=Application
 Name=omapreview

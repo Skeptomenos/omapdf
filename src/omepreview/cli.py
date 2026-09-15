@@ -221,11 +221,7 @@ def cmd_open(args):
 def cmd_edit(args):
     from . import gui
 
-    pdf = args.pdf
-    if not pdf:
-        pdf = gui.pick_pdf_path()
-        if not pdf:
-            raise SystemExit(0)
+    pdf = (args.pdf or "").strip() or None
     raise SystemExit(gui.run(pdf, args.ops))
 
 
@@ -479,7 +475,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_open)
 
     p = sub.add_parser("edit", help="open the omepreview editor (annotate, sign, drag)")
-    p.add_argument("pdf", nargs="?", help="PDF to open (file dialog if omitted)")
+    p.add_argument(
+        "pdf",
+        nargs="?",
+        help="PDF to open (omit for an empty editor; Open from the app)",
+    )
     p.add_argument("--ops", help="ops JSON to load as draggable proposals")
     p.set_defaults(func=cmd_edit)
 

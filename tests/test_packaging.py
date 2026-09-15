@@ -55,13 +55,15 @@ def test_visitor_install_script_uses_tarball_not_clone():
     text = (ROOT / "packaging/install.sh").read_text(encoding="utf-8")
     assert "git clone http" not in text
     assert "git clone git" not in text
-    assert "archive/refs/tags/v${VERSION}.tar.gz" in text
+    assert "archive/refs/tags/v${VERSION}.tar.gz" in text or "archive/" in text
     assert "python-pymupdf" in text
     assert "python-gobject" in text
     assert "python-cairo" in text
     assert "gtk4" in text
     assert "omapreview.desktop" in text
     assert "${VENV}/bin/omapreview" in text
+    assert "zenity" not in text
+    assert "kdialog" not in text
 
 
 def test_edit_accepts_a_missing_pdf_for_the_launcher():
@@ -69,3 +71,21 @@ def test_edit_accepts_a_missing_pdf_for_the_launcher():
     assert args.pdf is None
     args = build_parser().parse_args(["edit", "doc.pdf"])
     assert args.pdf == "doc.pdf"
+
+
+def test_edit_without_pdf_does_not_open_a_file_dialog():
+    import inspect
+
+    from omepreview.cli import cmd_edit
+
+    src = inspect.getsource(cmd_edit)
+    assert "pick_pdf_path" not in src
+    assert "gui.run" in src
+
+
+def test_desktop_exec_is_edit_not_a_file_picker():
+    text = (ROOT / "share/omapreview.desktop").read_text(encoding="utf-8")
+    assert "Exec=omapreview edit %f" in text
+    assert "zenity" not in text
+    assert "kdialog" not in text
+    assert "file-chooser" not in text

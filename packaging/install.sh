@@ -77,4 +77,5 @@ echo "installed: ${BIN_DIR}/omapreview -> ${exec_path}"
 echo "desktop:   ${DESKTOP_DST}"
 "${exec_path}" --version
 echo "Open from the Omarchy menu: Super+Space, type omapreview, Enter."
+echo "The editor starts empty — Open (Ctrl+O) picks a PDF. No file dialog in Exec."
 echo "If it is missing, run: omarchy restart shell"
