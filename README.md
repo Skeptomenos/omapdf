@@ -51,7 +51,7 @@ that menu. Details: [`docs/signature-trackpad.md`](docs/signature-trackpad.md).
 Two-window page copy uses `application/x-omepreview-pages` (legacy
 `application/x-omapdf-pages` still pastes).  
 **True redact** — content removal, not just black rectangles.  
-**Editorial rail** — transparent glyphs at 62% ink; ghost Save until you have pending work.
+**Editorial rail** — transparent glyphs at 52% ink; ghost Save until you have pending work.
 
 Forked from [omapdf](https://github.com/pbergin11/omapdf). omepreview is its own product.
 
