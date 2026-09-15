@@ -16,7 +16,8 @@ if [[ ! -f "${ROOT}/pyproject.toml" ]]; then
 fi
 
 if [[ ! -x "${VENV}/bin/python" ]]; then
-  python -m venv --system-site-packages "${VENV}"
+  PY="$(command -v python3 || command -v python)"
+  "${PY}" -m venv --system-site-packages "${VENV}"
 fi
 
 "${VENV}/bin/pip" install -e "${ROOT}"
