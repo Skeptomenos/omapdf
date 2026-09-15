@@ -17,6 +17,7 @@ from .page_clipboard import (
     write_pages_to_file,
     write_temp_pdf,
 )
+from .ops import OpError
 from .page_preview import PagePreviewState
 from .popover_safe import popover_try_popup
 
@@ -172,8 +173,15 @@ def build_page_sidebar(
         else:
             after = drop_after_for_row(row.page_index)
         pages = selected_1based() or [src_idx + 1]
+        # Dropping onto a page in the selection is a no-op — engine would
+        # raise "after page N is among the pages being moved".
+        if after != 0 and after in pages:
+            return False
         ed.checkpoint()
-        preview.move_selection_to_after(pages, after)
+        try:
+            preview.move_selection_to_after(pages, after)
+        except OpError:
+            return False
         touch_preview()
         on_change()
         toast(f"Moved page(s) {pages} after {after}")
@@ -217,30 +225,35 @@ def build_page_sidebar(
     menu.append("Insert file…", "page.insert_file")
     menu.append("Extract…", "page.extract")
     popover = Gtk.PopoverMenu.new_from_model(menu)
+    # One parent for the editor lifetime. Unparenting on ``closed`` races
+    # GMenu activate: the popover is already orphaned, so ``page.*`` never
+    # reaches the window action group and every item is a dead click.
+    # Do not call set_autohide (GTK 4.22 SEGV on mapped popovers).
     menu_host = {"widget": None}
-
-    def _release_page_menu(*_a):
-        if menu_host["widget"] is None:
-            return
-        try:
-            popover.unparent()
-        except Exception:
-            pass
-        menu_host["widget"] = None
-
-    try:
-        popover.connect("closed", _release_page_menu)
-    except Exception:
-        pass
 
     def show_menu(x, y):
         host = ed.window or side_list
-        if menu_host["widget"] is not host:
-            _release_page_menu()
+        parent = popover.get_parent()
+        if parent is None:
             popover.set_parent(host)
             menu_host["widget"] = host
+        elif parent is not host:
+            try:
+                popover.unparent()
+            except Exception:
+                pass
+            popover.set_parent(host)
+            menu_host["widget"] = host
+        px, py = int(x), int(y)
+        if host is not side_list:
+            try:
+                ok, tx, ty = side_list.translate_coordinates(host, x, y)
+                if ok:
+                    px, py = int(tx), int(ty)
+            except Exception:
+                pass
         rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        rect.x, rect.y, rect.width, rect.height = px, py, 1, 1
         popover.set_pointing_to(rect)
         popover_try_popup(popover)
 
@@ -357,6 +370,8 @@ def build_page_sidebar(
         action = Gio.SimpleAction.new(name, None)
         action.connect("activate", cb)
         action_group.add_action(action)
+    popover.insert_action_group("page", action_group)
+    side_list.insert_action_group("page", action_group)
 
     gesture_menu = Gtk.GestureClick()
     gesture_menu.set_button(3)
