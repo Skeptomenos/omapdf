@@ -12,6 +12,24 @@ import pymupdf
 from . import engine
 
 
+def index_after_move(page_count: int, pages: list[int], after: int) -> int:
+    """0-based destination of the first moved page after ``move_pages``.
+
+    Mirrors ``engine._apply_move_pages`` so the canvas can open the page
+    that was dragged instead of staying on (or snapping to) page 1.
+    """
+    if not pages:
+        raise ValueError("pages must be non-empty")
+    move_set = set(pages)
+    remaining = [p for p in range(1, page_count + 1) if p not in move_set]
+    if after == 0:
+        new_order = list(pages) + remaining
+    else:
+        insert_at = remaining.index(after) + 1
+        new_order = remaining[:insert_at] + list(pages) + remaining[insert_at:]
+    return new_order.index(pages[0])
+
+
 class PagePreviewState:
     """Tracks page-op ghosts and a scratch PDF that reflects them."""
 
