@@ -205,23 +205,83 @@ def cmd_sig(args):
         print(f"removed signature {args.name!r}")
 
 
+def _gtk_pick_pdf() -> str | None:
+    """Synchronous GTK file chooser for launcher launches with no %f."""
+    try:
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gio, GLib, Gtk
+    except (ImportError, ValueError) as exc:
+        raise OpError(
+            "no PDF given and GTK is unavailable — pass a path "
+            f"(omepreview open file.pdf) or install gtk4 + python-gobject ({exc})"
+        ) from exc
+
+    chosen: dict[str, str | None] = {"path": None}
+    app = Gtk.Application(
+        application_id="org.omepreview.FilePick",
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
+    )
+
+    def on_activate(_app):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Open PDF")
+        filt = Gtk.FileFilter()
+        filt.set_name("PDF")
+        filt.add_mime_type("application/pdf")
+        dialog.set_default_filter(filt)
+
+        def done(_d, result):
+            try:
+                fh = dialog.open_finish(result)
+            except GLib.Error:
+                app.quit()
+                return
+            chosen["path"] = fh.get_path() if fh is not None else None
+            app.quit()
+
+        dialog.open(None, None, done)
+
+    app.connect("activate", on_activate)
+    app.run(None)
+    return chosen["path"]
+
+
+def _pdf_or_pick(args) -> str:
+    """Resolve a PDF for open/edit. Launcher Exec omits %f when no file."""
+    if getattr(args, "pdf", None):
+        return args.pdf
+    pick = shutil.which("omepreview-pick")
+    if pick and shutil.which("omarchy-menu-select"):
+        raise SystemExit(subprocess.call([pick]))
+    path = _gtk_pick_pdf()
+    if not path:
+        raise OpError(
+            "no PDF given — pass a path, pick a file in the dialog, "
+            "or run: omepreview open file.pdf"
+        )
+    return path
+
+
 def cmd_open(args):
     # Opening a PDF means the omepreview editor. OMEPREVIEW_VIEWER (legacy
     # OMAPDF_VIEWER) forces an external viewer instead — but never xdg-open:
     # omepreview may itself be the desktop's default PDF handler, and
     # xdg-open would loop straight back to us.
+    pdf = _pdf_or_pick(args)
     override = os.environ.get("OMEPREVIEW_VIEWER") or os.environ.get("OMAPDF_VIEWER")
     if override:
-        cmd = [*shlex.split(override), args.pdf]
+        cmd = [*shlex.split(override), pdf]
     else:
-        cmd = [sys.executable, "-m", "omepreview.cli", "edit", args.pdf]
+        cmd = [sys.executable, "-m", "omepreview.cli", "edit", pdf]
     subprocess.Popen(cmd, start_new_session=True)
 
 
 def cmd_edit(args):
     from . import gui
 
-    raise SystemExit(gui.run(args.pdf, args.ops))
+    raise SystemExit(gui.run(_pdf_or_pick(args), args.ops))
 
 
 def cmd_pages(args):
@@ -462,11 +522,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_sig)
 
     p = sub.add_parser("open", help="open in the desktop PDF viewer")
-    p.add_argument("pdf")
+    p.add_argument("pdf", nargs="?", help="PDF path; omitted from the launcher")
     p.set_defaults(func=cmd_open)
 
     p = sub.add_parser("edit", help="open the omepreview editor (annotate, sign, drag)")
-    p.add_argument("pdf")
+    p.add_argument("pdf", nargs="?", help="PDF path; omitted from the launcher")
     p.add_argument("--ops", help="ops JSON to load as draggable proposals")
     p.set_defaults(func=cmd_edit)
 

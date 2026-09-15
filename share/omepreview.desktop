@@ -1,10 +1,15 @@
 [Desktop Entry]
 Type=Application
+Version=1.0
 Name=omepreview
 GenericName=PDF Viewer
 Comment=Read, annotate, and sign PDFs
 Exec=omepreview open %f
-Icon=application-pdf
+TryExec=omepreview
+Icon=omepreview
+StartupWMClass=org.omepreview.Editor
 MimeType=application/pdf;
 Categories=Office;Viewer;
+Keywords=PDF;Preview;annotate;sign;redact;omapreview;omapdf;
 Terminal=false
+StartupNotify=true
