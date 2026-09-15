@@ -1,33 +1,52 @@
 # Maintainer: Peter Bergin
 pkgname=omepreview
 pkgver=0.0.1
-pkgrel=1
+pkgrel=2
 pkgdesc="Preview-style PDF viewer and reviewer for Linux"
 arch=('any')
-url="https://github.com/Skeptomenos/omepreview"
+# GitHub repo spelling is omapreview (a); package and PATH command are omepreview (e).
+url="https://github.com/Skeptomenos/omapreview"
 license=('AGPL-3.0-or-later')
 depends=('python' 'python-pymupdf' 'gtk4' 'python-gobject' 'python-cairo')
 optdepends=(
   'python-mcp: MCP server for AI agents (omepreview-mcp)'
   'omarchy: bar widget and menu-based PDF picker'
 )
-makedepends=('git' 'python-build' 'python-installer' 'python-hatchling')
-# No GitHub release tag exists. Do not use archive/v$pkgver — that tarball
-# is not published. Package current main.
-source=("$pkgname::git+$url.git#branch=main")
-sha256sums=('SKIP')
+makedepends=('python-build' 'python-installer' 'python-hatchling')
+install=omepreview.install
+# Package this clone. `cd packaging && makepkg -si` from ~/omepreview installs
+# the checked-out tree. Do not use archive/v$pkgver — that tarball is unpublished.
+source=()
+sha256sums=()
+options=(!debug)
+
+prepare() {
+  local repo
+  repo="$(cd "$startdir/.." && pwd)"
+  if [[ ! -f "$repo/pyproject.toml" ]]; then
+    echo "omepreview: run makepkg from packaging/ inside a clone (missing $repo/pyproject.toml)" >&2
+    return 1
+  fi
+  mkdir -p "$srcdir/$pkgname"
+  cp -a "$repo/src" "$repo/share" "$repo/bin" "$repo/shell-plugin" \
+        "$repo/skill" "$repo/pyproject.toml" "$repo/LICENSE" "$repo/README.md" \
+        "$srcdir/$pkgname/"
+}
 
 build() {
-  cd "$pkgname"
+  cd "$srcdir/$pkgname"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$pkgname"
+  cd "$srcdir/$pkgname"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm755 bin/omepreview-pick "$pkgdir/usr/bin/omepreview-pick"
-  install -Dm644 share/omepreview.desktop "$pkgdir/usr/share/applications/omepreview.desktop"
+  install -Dm644 share/omepreview.desktop \
+    "$pkgdir/usr/share/applications/omepreview.desktop"
+  install -Dm644 share/icons/hicolor/scalable/apps/omepreview.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/omepreview.svg"
 
   # Omarchy bar widget, discoverable for manual linking into
   # ~/.config/omarchy/plugins/

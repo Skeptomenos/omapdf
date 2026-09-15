@@ -1,7 +1,35 @@
 # PKGBUILD smoke — aarch64 / Omarchy
 
-Slice 6 packaging notes. This cloud agent environment is **not** Arch Linux;
-full `makepkg` was **not** run here. Use this as the Omarchy/aarch64 checklist.
+This cloud agent environment is **not** Arch Linux; full `makepkg` is run on
+omarchy-air. GitHub is **omapreview** (a); the package and PATH command are
+**omepreview** (e).
+
+## Omarchy launcher (the path that works)
+
+From a clone at `~/omepreview` on the PR/branch that contains this PKGBUILD:
+
+```bash
+cd ~/omepreview/packaging
+makepkg -si
+omepreview --version
+omarchy-restart-walker
+```
+
+`makepkg -si` installs `/usr/bin/omepreview` and
+`/usr/share/applications/omepreview.desktop`. Walker (Super+Space / Super+Alt+Space)
+reads XDG desktop files; Elephant auto-detects new ones. If the name does not
+appear immediately, `omarchy-restart-walker` restarts `elephant.service` and
+`app-walker@autostart.service`.
+
+**Do not** use `omarchy-refresh-applications` for this app. That script copies
+Omarchy's bundled launchers into `~/.local/share/applications` (webapps, TUIs,
+hidden entries) and is not how a pacman package registers.
+
+Optional default PDF handler:
+
+```bash
+xdg-mime default omepreview.desktop application/pdf
+```
 
 ## What was run here (any CPU)
 
@@ -14,30 +42,28 @@ full `makepkg` was **not** run here. Use this as the Omarchy/aarch64 checklist.
 
 ## What needs Omarchy (or Arch aarch64)
 
-Run on real hardware before publishing to AUR:
-
 ```bash
-# From a clean Arch/aarch64 chroot or Omarchy machine
 cd packaging
-makepkg -f -si   # or -o for offline build
+makepkg -f -si
 omepreview --version
 omepreview-mcp --help 2>/dev/null || true   # needs python-mcp optdepend
-omepreview edit /path/to/sample.pdf         # needs gtk4 + python-gobject
+omepreview edit /path/to/sample.pdf
 ```
 
 | Check | Notes |
 |-------|--------|
-| `depends` resolve | `python`, `python-pymupdf` on aarch64 |
-| `optdepends` | `python-mcp`, Omarchy bar paths in `optdepends` comment |
-| Desktop file | `share/omepreview.desktop` opens PDFs via `omepreview open` |
-| Bar widget | `cp /usr/share/omepreview/shell-plugin/omapdf.bar ~/.config/omarchy/plugins/` |
+| `depends` resolve | `python`, `python-pymupdf` (aarch64 extra), `gtk4`, `python-gobject`, `python-cairo` |
+| `optdepends` | `python-mcp`; Omarchy bar at `/usr/share/omepreview/shell-plugin/` |
+| Desktop file | `omepreview open %f` — PATH binary, not `.venv` |
+| Icon | `omepreview.svg` in hicolor scalable |
+| Bar widget | `ln -s /usr/share/omepreview/shell-plugin/omapdf.bar ~/.config/omarchy/plugins/` |
 | GTK editor | Page sidebar (F9), redact tool (R), form click-fill |
 
-## PKGBUILD gaps to watch
+## PKGBUILD notes
 
-- `arch=('any')` — pure Python; no native compile, but PyMuPDF wheel must exist for aarch64 on Arch.
-- `pkgver` / `source` — PKGBUILD clones git `main`. There is no GitHub `v$pkgver` tarball; do not invent a release tag. Pin `sha256sums` when a tag exists.
-- Editor is not a hard `depends`; document `gtk4` + `python-gobject` for `omepreview edit` in README.
+- `arch=('any')` — pure Python; `python-pymupdf` must exist for the host arch (it does on Arch Linux ARM aarch64 extra).
+- `source=()` — packages the parent of `packaging/` (this clone). There is no GitHub `v$pkgver` tarball; do not invent a release tag.
+- `url` points at `Skeptomenos/omapreview`. A clone of `…/omepreview` (e) 404s.
 
 ## Evidence
 
