@@ -42,6 +42,11 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     assert "popover.background" in body
     assert "scrolledwindow.omapdf-thumb-rail" in body
     assert "box.omapdf-overlay-toolbar" in body
+    assert "opacity: 0.52;" in body
+    assert "opacity: 0.62;" not in body
+    rail = src[src.index("def _overlay_rail_css") : src.index("class Editor")]
+    assert "opacity: 0.52;" in rail
+    assert "button.tool-slim" in rail
     assert "border: none" in body
     assert "border: 2px" not in body
     assert "#" not in body.replace("def _editorial_css", "")

@@ -299,7 +299,7 @@ box.omapdf-overlay-toolbar .zoom-indicator {{
   font-weight: normal;
   font-feature-settings: "tnum";
   letter-spacing: 0.02em;
-  opacity: 0.62;
+  opacity: 0.52;
 }}
 button.omapdf-sig-card,
 box.omapdf-sig-card {{
@@ -311,7 +311,7 @@ button.omapdf-sig-card label,
 box.omapdf-sig-card label {{
   font-family: monospace;
   font-size: 10.5px;
-  opacity: 0.62;
+  opacity: 0.52;
 }}
 box.omapdf-sig-actions {{
   min-width: 280px;
@@ -350,7 +350,7 @@ listbox.omapdf-thumbs row.omapdf-thumb-selected label {{
   opacity: 0.9;
 }}
 listbox.omapdf-thumbs row.omapdf-thumb-inserted label {{
-  opacity: 0.62;
+  opacity: 0.52;
 }}
 listbox.omapdf-thumbs row.omapdf-thumb-dragging {{
   opacity: 0.28;
@@ -393,7 +393,7 @@ box.omapdf-overlay-toolbar menubutton.tool-slim > button {
   min-height: 28px;
   padding: 0;
   margin: 2px 8px;
-  opacity: 0.62;
+  opacity: 0.52;
   transition: opacity 120ms ease;
 }
 box.omapdf-overlay-toolbar button.tool-slim:hover,
