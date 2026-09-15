@@ -37,12 +37,9 @@ def insertion_marker_y(target_row_y: int | None, last_row_bottom: int) -> int:
 def clear_thumb_dragging(thumb_row) -> None:
     """Drop the dragging dim class. No-op if *thumb_row* is not a widget.
 
-    Gtk.DragSource ``drag-end`` is ``(source, drag, delete_data: bool)``. A
-    handler written as ``def on_drag_end(_src, _drag, row=row)`` binds that
-    bool onto ``row`` and crashes: ``'bool' object has no attribute
-    'remove_css_class'``. Callers must capture the widget with a keyword-only
-    default (``*, thumb_row=row``) so GTK's third positional arg stays
-    ``delete_data``.
+    Gtk.DragSource ``drag-end`` is ``(source, drag, delete_data: bool)``.
+    Do not take that bool as the row. Capture the widget with a keyword-only
+    default so the third positional arg stays ``delete_data``.
     """
     remover = getattr(thumb_row, "remove_css_class", None)
     if not callable(remover):

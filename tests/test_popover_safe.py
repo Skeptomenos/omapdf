@@ -164,5 +164,10 @@ def test_reorder_drop_swallows_illegal_after():
     end_fn = src[src.index("def on_drag_end") : src.index("drag.connect(\"drag-end\"")]
     assert "_delete_data" in end_fn
     assert "*, thumb_row=" in end_fn
-    assert "def on_drag_end(_src, _drag, row=" not in src
     assert "clear_thumb_dragging" in end_fn
+    handlers = [
+        ln.strip()
+        for ln in src.splitlines()
+        if ln.strip().startswith("def on_drag_end")
+    ]
+    assert handlers == ["def on_drag_end(_src, _drag, _delete_data=False, *, thumb_row=row):"]
