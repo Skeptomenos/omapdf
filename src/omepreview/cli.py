@@ -221,7 +221,12 @@ def cmd_open(args):
 def cmd_edit(args):
     from . import gui
 
-    raise SystemExit(gui.run(args.pdf, args.ops))
+    pdf = args.pdf
+    if not pdf:
+        pdf = gui.pick_pdf_path()
+        if not pdf:
+            raise SystemExit(0)
+    raise SystemExit(gui.run(pdf, args.ops))
 
 
 def cmd_pages(args):
@@ -303,12 +308,20 @@ def cmd_snapshot(args):
     _emit(result, True)
 
 
+def _cli_prog() -> str:
+    name = Path(sys.argv[0]).name if sys.argv else "omepreview"
+    if name.startswith("omapreview"):
+        return "omapreview"
+    return "omepreview"
+
+
 def build_parser() -> argparse.ArgumentParser:
+    prog = _cli_prog()
     parser = argparse.ArgumentParser(
-        prog="omepreview",
+        prog=prog,
         description="Agent-native PDF annotation and signing.",
     )
-    parser.add_argument("--version", action="version", version=f"omepreview {__version__}")
+    parser.add_argument("--version", action="version", version=f"{prog} {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("read", help="structured document read (JSON)")
@@ -466,7 +479,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_open)
 
     p = sub.add_parser("edit", help="open the omepreview editor (annotate, sign, drag)")
-    p.add_argument("pdf")
+    p.add_argument("pdf", nargs="?", help="PDF to open (file dialog if omitted)")
     p.add_argument("--ops", help="ops JSON to load as draggable proposals")
     p.set_defaults(func=cmd_edit)
 

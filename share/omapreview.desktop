@@ -12,4 +12,3 @@ Keywords=PDF;annotate;sign;redact;omapreview;
 Terminal=false
 StartupNotify=true
 StartupWMClass=org.omepreview.Editor
-NoDisplay=true

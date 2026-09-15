@@ -62,8 +62,10 @@ index="${subtext%% *}"
 path="${files[$((index - 1))]:-}"
 [[ -n $path && -f $path ]] || exit 1
 
-if command -v omepreview >/dev/null 2>&1; then
-  exec omepreview open "$path"
+if command -v omapreview >/dev/null 2>&1; then
+  exec omapreview edit "$path"
+elif command -v omepreview >/dev/null 2>&1; then
+  exec omepreview edit "$path"
 else
   exec xdg-open "$path"
 fi

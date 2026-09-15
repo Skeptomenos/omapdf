@@ -6,7 +6,7 @@ on purpose.
 ## Setup
 
 ```bash
-git clone https://github.com/Skeptomenos/omepreview.git && cd omepreview
+git clone https://github.com/Skeptomenos/omapreview.git && cd omapreview
 python -m venv --system-site-packages .venv   # system PyGObject for the editor
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest tests/ -q

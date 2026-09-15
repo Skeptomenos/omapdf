@@ -20,16 +20,16 @@ Run on real hardware before publishing to AUR:
 # From a clean Arch/aarch64 chroot or Omarchy machine
 cd packaging
 makepkg -f -si   # or -o for offline build
-omepreview --version
-omepreview-mcp --help 2>/dev/null || true   # needs python-mcp optdepend
-omepreview edit /path/to/sample.pdf         # needs gtk4 + python-gobject
+omapreview --version
+omapreview-mcp --help 2>/dev/null || true   # needs python-mcp optdepend
+omapreview edit /path/to/sample.pdf         # needs gtk4 + python-gobject
 ```
 
 | Check | Notes |
 |-------|--------|
 | `depends` resolve | `python`, `python-pymupdf` on aarch64 |
 | `optdepends` | `python-mcp`, Omarchy bar paths in `optdepends` comment |
-| Desktop file | `share/omepreview.desktop` opens PDFs via `omepreview open` |
+| Desktop file | `share/omapreview.desktop` opens PDFs via `omapreview edit` |
 | Bar widget | `cp /usr/share/omepreview/shell-plugin/omapdf.bar ~/.config/omarchy/plugins/` |
 | GTK editor | Page sidebar (F9), redact tool (R), form click-fill |
 

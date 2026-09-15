@@ -61,12 +61,17 @@ No GitHub release tag yet. Clone `main` and use a venv (keeps system GTK
 bindings for the editor):
 
 ```bash
-git clone https://github.com/Skeptomenos/omepreview.git
-cd omepreview
+git clone https://github.com/Skeptomenos/omapreview.git
+cd omapreview   # on omarchy-air the checkout is ~/omepreview
 python -m venv --system-site-packages .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/omepreview --version          # omepreview 0.0.1
+.venv/bin/omapreview --version          # omapreview 0.0.1
 ```
+
+The Python package is still `omepreview`; `omapreview` is the launcher command
+(alias of the same CLI). On Omarchy, [`packaging/install-user.sh`](packaging/install-user.sh)
+puts `omapreview` on `~/.local/bin` and installs
+`~/.local/share/applications/omapreview.desktop`.
 
 **Arch:** [`packaging/PKGBUILD`](packaging/PKGBUILD) builds **git `main`**, not
 a `v0.0.1` tarball (that archive is not published). From a clone:
@@ -75,9 +80,9 @@ a `v0.0.1` tarball (that archive is not published). From a clone:
 cd packaging && makepkg -si
 ```
 
-Or skip packaging and use the venv above.
+Or skip packaging and use the venv / `install-user.sh` path above.
 
-Desktop handler: `share/omepreview.desktop` · Application ID: `org.omepreview.Editor`
+Desktop handler: `share/omapreview.desktop` · Application ID: `org.omepreview.Editor`
 
 Window-control override: `OMEPREVIEW_WINDOW_CONTROLS=1|0`
 (`OMAPDF_WINDOW_CONTROLS` still works as a deprecated alias).
@@ -85,11 +90,11 @@ Window-control override: `OMEPREVIEW_WINDOW_CONTROLS=1|0`
 ## Quick start
 
 ```bash
-omepreview edit document.pdf
-omepreview read document.pdf --json
-omepreview sig draw                   # Space to record; Enter saves SVG
-omepreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
-omepreview --version                  # omepreview 0.0.1
+omapreview edit document.pdf
+omapreview read document.pdf --json
+omapreview sig draw                   # Space to record; Enter saves SVG
+omapreview sign document.pdf --page 2 --at 120,540 -o signed.pdf
+omapreview --version                  # omapreview 0.0.1
 ```
 
 ## For agents

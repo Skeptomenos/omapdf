@@ -1,8 +1,8 @@
 # The omepreview editor
 
 The editor lives at [`src/omepreview/gui.py`](../src/omepreview/gui.py) and launches
-with `omepreview edit doc.pdf` (also the target of `omepreview open` and the
-`omepreview.desktop` handler). It is GTK4 + cairo + PyMuPDF — pure Python, no
+with `omapreview edit doc.pdf` (also the target of `omapreview open` and the
+`omapreview.desktop` handler). It is GTK4 + cairo + PyMuPDF — pure Python, no
 compiled UI code. This directory holds its design notes.
 
 ## Design principles (all hold today)

@@ -976,6 +976,41 @@ class Editor:
             it["strokes"] = [[(px + dx, py + dy) for px, py in s] for s in it["strokes"]]
 
 
+def pick_pdf_path() -> str | None:
+    """Blocking file dialog for a launcher start with no PDF on the command line."""
+    chosen: dict[str, str | None] = {"path": None}
+
+    app = Gtk.Application(
+        application_id="org.omepreview.Open",
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
+    )
+
+    def on_activate(_app):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Open PDF")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        f_pdf = Gtk.FileFilter()
+        f_pdf.set_name("PDF")
+        f_pdf.add_mime_type("application/pdf")
+        filters.append(f_pdf)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(f_pdf)
+
+        def on_open(_d, result):
+            try:
+                file = dialog.open_finish(result)
+                chosen["path"] = file.get_path() if file is not None else None
+            except GLib.Error:
+                chosen["path"] = None
+            app.quit()
+
+        dialog.open(None, None, on_open)
+
+    app.connect("activate", on_activate)
+    app.run([])
+    return chosen["path"]
+
+
 def run(pdf: str, ops_file: str | None = None) -> int:
     _sync_color_scheme()
     ed = Editor(pdf, ops_file)

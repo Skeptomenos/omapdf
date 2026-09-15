@@ -21,10 +21,12 @@ dev = ["pytest", "mcp>=1.2"]
 
 [project.scripts]
 omepreview = "omepreview.cli:main"
+omapreview = "omepreview.cli:main"
 omepreview-mcp = "omepreview.mcp_server:main"
+omapreview-mcp = "omepreview.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/Skeptomenos/omepreview"
+Homepage = "https://github.com/Skeptomenos/omapreview"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omepreview"]

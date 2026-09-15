@@ -37,8 +37,10 @@ choice="$(
 
 path="${choice#*$'\t'}"
 
-if command -v omepreview >/dev/null 2>&1; then
-  exec omepreview open "$path"
+if command -v omapreview >/dev/null 2>&1; then
+  exec omapreview edit "$path"
+elif command -v omepreview >/dev/null 2>&1; then
+  exec omepreview edit "$path"
 else
   exec xdg-open "$path"
 fi
