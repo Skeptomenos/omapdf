@@ -33,8 +33,9 @@ def prove_engine_render(pdf: Path) -> dict:
     doc = pymupdf.open(pdf)
     page = doc[0]
     z = 1.2
-    matrix = pymupdf.Matrix(z, z).prerotate(page.rotation)
-    pix = page.get_pixmap(matrix=matrix, alpha=False)
+    from omepreview.render import raster_page
+
+    pix = raster_page(page, z, alpha=False)
     text = page.get_text()
     doc.close()
     out = EVIDENCE / "main-pane-raster.png"

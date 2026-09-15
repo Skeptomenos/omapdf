@@ -44,6 +44,7 @@ from .crop_coords import transform_pending_for_crop
 from . import signature as sig_store
 from .ops import OpError
 from .page_preview import PagePreviewState
+from .render import raster_page
 from .redact_io import (
     match_redact_ghosts,
     redact_item_to_op,
@@ -311,6 +312,13 @@ listbox.omapdf-thumbs row.omapdf-thumb-selected label {{
 }}
 listbox.omapdf-thumbs row.omapdf-thumb-inserted label {{
   opacity: 0.62;
+}}
+listbox.omapdf-thumbs row.omapdf-thumb-dragging {{
+  opacity: 0.28;
+}}
+box.omapdf-drop-slot {{
+  background-color: @theme_selected_bg_color;
+  min-height: 4px;
 }}
 """.encode()
 
@@ -1049,8 +1057,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
             ed.zoom = z
             zoom_dot.set_text("Fit" if ed.zoom_pct is None else f"{int(ed.zoom_pct)}%")
             page = ed.page()
-            matrix = pymupdf.Matrix(z, z).prerotate(page.rotation)
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            pix = raster_page(page, z, alpha=False)
             if pix.width < 1 or pix.height < 1:
                 return
             ed.page_surface = cairo.ImageSurface.create_from_png(

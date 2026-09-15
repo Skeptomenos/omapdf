@@ -150,3 +150,7 @@ def test_reorder_drop_swallows_illegal_after():
     assert "if after != 0 and after in pages:" in body
     assert "except OpError:" in body
     assert "traceback" not in body.lower()
+    src_all = src
+    assert "set_icon" in src_all
+    assert "omapdf-drop-slot" in src_all
+    assert "show_drop_slot" in src_all
