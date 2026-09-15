@@ -210,43 +210,62 @@ def watch_theme_set(callback) -> None:
     """Reload chrome when ``omarchy-theme-set`` swaps the theme (then the hook).
 
     Omarchy replaces ``theme/`` atomically, so monitors on the old
-    ``colors.toml`` die after a swap. Re-arm on every wake, and poll the
-    file signature so in-place edits are not missed.
+    ``colors.toml`` die after a swap. Re-arm on every wake, recreate the
+    file monitor (Gio often delivers only one in-place change), and poll
+    the file signature so in-place edits are not missed.
     """
 
-    pending = {"src": 0}
+    gen = {"n": 0}
     seen: set[str] = set()
     last_sig = {"v": colors_file_signature(locate_colors_toml())}
 
     def fire():
-        pending["src"] = 0
-        _arm_theme_monitors(seen, on_changed)
         last_sig["v"] = colors_file_signature(locate_colors_toml())
-        callback()
+        _arm_theme_monitors(seen, on_changed, remonitor_file=True)
+        try:
+            callback()
+        except Exception:
+            pass
         return False
 
     def on_changed(*_a):
-        src = pending["src"]
-        if src:
-            GLib.source_remove(src)
-        pending["src"] = GLib.timeout_add(_THEME_SET_DEBOUNCE_MS, fire)
+        gen["n"] += 1
+        token = gen["n"]
+
+        def debounced():
+            if token != gen["n"]:
+                return False
+            fire()
+            return False
+
+        GLib.timeout_add(_THEME_SET_DEBOUNCE_MS, debounced)
 
     def poll_signature():
-        sig = colors_file_signature(locate_colors_toml())
-        if sig != last_sig["v"]:
-            on_changed()
+        try:
+            sig = colors_file_signature(locate_colors_toml())
+            if sig != last_sig["v"]:
+                last_sig["v"] = sig
+                fire()
+        except Exception:
+            pass
         return True
 
-    _arm_theme_monitors(seen, on_changed)
-    GLib.timeout_add(400, poll_signature)
+    _arm_theme_monitors(seen, on_changed, remonitor_file=True)
+    poll_id = GLib.timeout_add(400, poll_signature)
+    _WATCH_KEEPALIVE.append(poll_id)
     _WATCH_KEEPALIVE.append(poll_signature)
 
 
-def _arm_theme_monitors(seen: set[str], on_changed) -> None:
+def _arm_theme_monitors(
+    seen: set[str], on_changed, *, remonitor_file: bool = False
+) -> None:
     try:
         flags = Gio.FileMonitorFlags.WATCH_MOVES
     except AttributeError:
         flags = Gio.FileMonitorFlags.NONE
+    colors = locate_colors_toml()
+    if remonitor_file and colors is not None:
+        seen.discard(str(colors))
     for path in theme_watch_paths():
         if not path.exists():
             continue

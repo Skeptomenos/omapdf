@@ -1810,19 +1810,23 @@ def run(pdf: str, ops_file: str | None = None) -> int:
                     _bg = chrome_theme.hex_to_rgb(pal.get("background"))
                     _fg = chrome_theme.hex_to_rgb(pal.get("foreground"))
                     prefix = pal.css_defines()
+                    _light = chrome_theme.desk_is_light(_bg)
+                    blob = prefix + _editorial_css(_light)
                 else:
-                    chrome_theme.sync_gtk_appearance()
-                    _bg, _fg = _theme_colors(win)
+                    dark = chrome_theme.sync_gtk_appearance()
+                    _light = not dark
                     prefix = b""
-                _light = chrome_theme.desk_is_light(_bg)
+                    blob = prefix + _editorial_css(_light)
+                if show_window_controls:
+                    blob += WINDOW_CONTROLS_CSS
+                css.load_from_data(blob)
+                if pal is None:
+                    _bg, _fg = _theme_colors(win)
+                    _light = chrome_theme.desk_is_light(_bg)
                 chrome["desk"] = _desk_rgb(_bg, _light)
                 chrome["fg"] = _fg
                 chrome["light"] = _light
                 chrome["shadows"] = SHADOWS_LIGHT if _light else SHADOWS_DARK
-                blob = prefix + _editorial_css(_light)
-                if show_window_controls:
-                    blob += WINDOW_CONTROLS_CSS
-                css.load_from_data(blob)
                 area.queue_draw()
                 win.queue_draw()
             finally:

@@ -49,13 +49,13 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     assert "load_omarchy_palette" in apply
     assert "css_defines" in apply
     assert "blob = prefix + _editorial_css" in apply
-    assert "applying[\"again\"]" in apply
-    assert "GLib.idle_add(apply_chrome)" in apply
     assert "blob += WINDOW_CONTROLS_CSS" in apply
     assert "css.load_from_data(blob)" in apply
     assert "css.load_from_data(WINDOW_CONTROLS_CSS)" not in src
     assert "sync_gtk_appearance" in apply
     assert "desk_is_light" in apply
+    assert "applying[\"again\"]" in apply
+    assert "GLib.idle_add(apply_chrome)" in apply
     assert "ctx.set_source_rgb(1, 1, 1)" in src
     tail = src[src.index("chrome_theme.watch_appearance") : src.index('win.connect("realize"')]
     assert "watch_theme_set" in tail
