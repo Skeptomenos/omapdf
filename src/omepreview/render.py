@@ -15,6 +15,21 @@ import pymupdf
 GRID_COLOR = (0.85, 0.2, 0.2)
 
 
+def page_view_matrix(zoom: float) -> pymupdf.Matrix:
+    """Scale-only matrix for on-screen rasters.
+
+    ``Page.get_pixmap`` already honours ``/Rotate``. ``prerotate(page.rotation)``
+    applies it a second time, so a 90° rotate looks like 180°.
+    """
+    z = float(zoom)
+    return pymupdf.Matrix(z, z)
+
+
+def raster_page(page: pymupdf.Page, zoom: float = 1.0, *, alpha: bool = False):
+    """Pixmap of *page* at *zoom*, with ``/Rotate`` applied once."""
+    return page.get_pixmap(matrix=page_view_matrix(zoom), alpha=alpha)
+
+
 def snapshot(
     pdf: str | Path,
     page: int = 1,
@@ -40,7 +55,7 @@ def snapshot(
         if output is None:
             suffix = f"-p{page}-grid.png" if grid else f"-p{page}.png"
             output = pdf.with_name(pdf.stem + suffix)
-        pix = pg.get_pixmap(matrix=pymupdf.Matrix(scale, scale))
+        pix = raster_page(pg, scale)
         pix.save(str(output))
         return {"output": str(output), "page": page, "size": size}
     finally:

@@ -5,6 +5,10 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 import pymupdf
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
@@ -20,6 +24,14 @@ from .page_clipboard import (
 from .ops import OpError
 from .page_preview import PagePreviewState
 from .popover_safe import popover_try_popup
+from .render import raster_page
+
+
+def insertion_marker_y(target_row_y: int | None, last_row_bottom: int) -> int:
+    """Y of the drop line: top of the hovered row (in front of it), or after the last."""
+    if target_row_y is None:
+        return last_row_bottom
+    return target_row_y
 
 
 def build_page_sidebar(
@@ -42,6 +54,36 @@ def build_page_sidebar(
 
     side_list = Gtk.ListBox()
     side_list.add_css_class("omapdf-thumbs")
+    overlay = Gtk.Overlay()
+    overlay.set_child(side_list)
+    slot_line = Gtk.Box()
+    slot_line.add_css_class("omapdf-drop-slot")
+    slot_line.set_valign(Gtk.Align.START)
+    slot_line.set_halign(Gtk.Align.FILL)
+    slot_line.set_can_target(False)
+    slot_line.set_margin_start(8)
+    slot_line.set_margin_end(8)
+    slot_line.set_visible(False)
+    overlay.add_overlay(slot_line)
+
+    def last_row_bottom() -> int:
+        if not row_widgets:
+            return 0
+        alloc = row_widgets[-1].get_allocation()
+        return int(alloc.y + alloc.height)
+
+    def show_drop_slot(y: float):
+        row = side_list.get_row_at_y(int(y))
+        if row is None:
+            slot_y = insertion_marker_y(None, last_row_bottom())
+        else:
+            alloc = row.get_allocation()
+            slot_y = insertion_marker_y(int(alloc.y), last_row_bottom())
+        slot_line.set_margin_top(max(0, slot_y - 2))
+        slot_line.set_visible(True)
+
+    def hide_drop_slot(*_a):
+        slot_line.set_visible(False)
 
     def pages_doc() -> pymupdf.Document:
         return ed.page_doc()
@@ -55,9 +97,7 @@ def build_page_sidebar(
                 pg = doc[n]
                 thumb_w = 84
                 scale = (thumb_w * 2) / pg.rect.width
-                pix = pg.get_pixmap(
-                    matrix=pymupdf.Matrix(scale, scale).prerotate(pg.rotation),
-                )
+                pix = raster_page(pg, scale)
                 texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(pix.tobytes("png")))
                 pic = Gtk.Picture.new_for_paintable(texture)
                 pic.add_css_class("omapdf-thumb")
@@ -127,6 +167,19 @@ def build_page_sidebar(
                         )
                     return Gdk.ContentProvider.new_for_value(str(idx))
 
+                def on_drag_begin(src, _drag, row=row, tex=texture):
+                    row.add_css_class("omapdf-thumb-dragging")
+                    try:
+                        src.set_icon(tex, thumb_w // 2, 36)
+                    except Exception:
+                        pass
+
+                def on_drag_end(_src, _drag, row=row):
+                    row.remove_css_class("omapdf-thumb-dragging")
+                    hide_drop_slot()
+
+                drag.connect("drag-begin", on_drag_begin)
+                drag.connect("drag-end", on_drag_end)
                 drag.connect("prepare", prepare)
                 row.add_controller(drag)
                 side_list.append(row)
@@ -185,9 +238,21 @@ def build_page_sidebar(
         touch_preview()
         on_change()
         toast(f"Moved page(s) {pages} after {after}")
+        hide_drop_slot()
         return True
 
+    def on_reorder_enter(_t, x, y):
+        show_drop_slot(y)
+        return Gdk.DragAction.MOVE
+
+    def on_reorder_motion(_t, x, y):
+        show_drop_slot(y)
+        return Gdk.DragAction.MOVE
+
     drop_target.connect("drop", on_reorder_drop)
+    drop_target.connect("enter", on_reorder_enter)
+    drop_target.connect("motion", on_reorder_motion)
+    drop_target.connect("leave", hide_drop_slot)
     side_list.add_controller(drop_target)
 
     file_target = Gtk.DropTarget.new(GObject.TYPE_NONE, Gdk.DragAction.COPY)
@@ -465,7 +530,7 @@ def build_page_sidebar(
         return True
 
     return {
-        "widget": side_list,
+        "widget": overlay,
         "refresh": refresh_thumbs,
         "highlight_current": highlight_current,
         "select_row": highlight_current,
