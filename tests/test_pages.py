@@ -72,6 +72,16 @@ def test_move_pages_after(six_page_pdf, tmp_path):
     assert [t.split()[1] for t in texts] == ["1", "5", "6", "2", "3", "4"]
 
 
+def test_move_pages_after_in_selection_raises(six_page_pdf, tmp_path):
+    """Engine still rejects after-page-in-selection; GUI must no-op instead."""
+    with pytest.raises(OpError, match="among the pages being moved"):
+        engine.apply(
+            six_page_pdf,
+            [{"op": "move_pages", "pages": [3], "after": 3}],
+            output=tmp_path / "nope.pdf",
+        )
+
+
 def test_insert_pdf_pages(five_page_pdf, tmp_path):
     """§6.1.4 — insert pages 1–2 of B after page 1 of A."""
     src = make_labeled_pdf(tmp_path / "src.pdf", page_count=3, label_prefix="SRC")

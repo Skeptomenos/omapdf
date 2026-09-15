@@ -123,7 +123,7 @@ def test_popover_busy_sets_on_popup_and_clears_on_closed():
     assert popover_busy() is False
 
 
-def test_page_menu_reuses_parent():
+def test_page_menu_keeps_parent_and_actions():
     src = (
         Path(__file__).resolve().parents[1]
         / "src"
@@ -131,7 +131,22 @@ def test_page_menu_reuses_parent():
         / "gui_pages.py"
     ).read_text(encoding="utf-8")
     body = src[src.index("def show_menu") : src.index("def act_rotate_cw")]
-    assert "if menu_host[\"widget\"] is not host:" in body
     assert "popover.set_parent(host)" in body
     assert "popover_try_popup(popover)" in body
-    assert "popover.set_parent(ed.window or side_list)" not in body
+    assert "popover.connect(\"closed\"" not in src
+    assert "popover.insert_action_group(\"page\"" in src
+    assert "side_list.insert_action_group(\"page\"" in src
+    assert ".set_autohide(" not in src
+
+
+def test_reorder_drop_swallows_illegal_after():
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "omepreview"
+        / "gui_pages.py"
+    ).read_text(encoding="utf-8")
+    body = src[src.index("def on_reorder_drop") : src.index("drop_target.connect")]
+    assert "if after != 0 and after in pages:" in body
+    assert "except OpError:" in body
+    assert "traceback" not in body.lower()

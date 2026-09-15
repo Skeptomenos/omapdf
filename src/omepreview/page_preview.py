@@ -126,6 +126,8 @@ class PagePreviewState:
     def move_selection_to_after(self, selected_1based: list[int], after: int):
         if not selected_1based:
             return
+        if after != 0 and after in selected_1based:
+            return
         self.add_move_pages(selected_1based, after)
 
     def _mark_inserted_pages(self, doc: pymupdf.Document) -> set[int]:

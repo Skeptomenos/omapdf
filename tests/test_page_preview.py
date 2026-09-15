@@ -25,3 +25,18 @@ def test_preview_move_pages(tmp_path):
     labels = [doc[n].get_text("text").strip().split()[-1] for n in range(doc.page_count)]
     doc.close()
     assert labels == ["1", "5", "6", "2", "3", "4"]
+
+
+def test_preview_illegal_move_is_noop(tmp_path):
+    pdf = make_labeled_pdf(tmp_path / "six.pdf", page_count=6)
+    state = PagePreviewState(pdf)
+    state.move_selection_to_after([3], after=3)
+    assert not state.has_changes()
+    state.move_selection_to_after([2, 3], after=2)
+    assert not state.has_changes()
+    state.move_selection_to_after([5, 6], after=1)
+    assert state.has_changes()
+    doc = state.open_view()
+    labels = [doc[n].get_text("text").strip().split()[-1] for n in range(doc.page_count)]
+    doc.close()
+    assert labels == ["1", "5", "6", "2", "3", "4"]
