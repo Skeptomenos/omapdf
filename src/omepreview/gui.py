@@ -249,6 +249,10 @@ window.omapdf-editor, scrolledwindow.omapdf-thumb-rail, listbox.omapdf-thumbs {{
 }}
 scrolledwindow.omapdf-thumb-rail > viewport,
 scrolledwindow.omapdf-thumb-rail viewport,
+scrolledwindow.omapdf-thumb-rail overlay,
+overlay.omapdf-thumbs-overlay,
+list.omapdf-thumbs,
+revealer.omapdf-thumb-revealer,
 scrolledwindow.omapdf-page-canvas,
 scrolledwindow.omapdf-page-canvas > viewport,
 scrolledwindow.omapdf-page-canvas viewport,
@@ -3045,6 +3049,7 @@ def run(pdf: str, ops_file: str | None = None) -> int:
         side_scroll.set_size_request(132, -1)
         side_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         side_revealer = Gtk.Revealer()
+        side_revealer.add_css_class("omapdf-thumb-revealer")
         side_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
         side_revealer.set_child(side_scroll)
         side_revealer.set_hexpand(False)

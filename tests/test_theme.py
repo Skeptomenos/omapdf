@@ -56,6 +56,7 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     assert "css.load_from_data(WINDOW_CONTROLS_CSS)" not in src
     assert "STYLE_PROVIDER_PRIORITY_USER" in src[src.index("def apply_chrome") : src.index("chrome_theme.watch_appearance")]
     assert "viewport" in body
+    assert "omapdf-thumbs-overlay" in body
     assert "background-color: @omapdf_desk" in body
     assert "sync_gtk_appearance" in apply
     assert "desk_is_light" in apply
@@ -64,3 +65,7 @@ def test_editorial_css_uses_adwaita_tokens_and_styles_popovers():
     assert "ctx.set_source_rgb(1, 1, 1)" in src
     tail = src[src.index("chrome_theme.watch_appearance") : src.index('win.connect("realize"')]
     assert "watch_theme_set" in tail
+    pages = (
+        Path(__file__).resolve().parents[1] / "src" / "omepreview" / "gui_pages.py"
+    ).read_text(encoding="utf-8")
+    assert "omapdf-thumbs-overlay" in pages
